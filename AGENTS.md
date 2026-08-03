@@ -77,6 +77,7 @@ superwiki/
 - `viewMode`：`editor`、`split` 或 `preview`。
 - `saveState`：`saved`、`saving` 或 `error`。
 - `superwiki.workspaceRoot`：保存在 `localStorage` 中的上次打开目录。
+- 标题栏通过 `workspaceRelativePath` 只读展示当前文件相对于工作区根目录的路径。
 
 ### 4.2 文件夹选择
 
@@ -278,6 +279,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 4. 编辑、分栏、预览三种模式。
 5. 长文档预览可以独立滚动。
 6. 图片文件只能预览，不显示编辑器和保存状态。
+7. Markdown 和图片标题栏均正确显示只读相对路径。
 
 ## 9. Git 约定
 

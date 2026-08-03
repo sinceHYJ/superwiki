@@ -93,8 +93,12 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
   background: rgba(251, 251, 248, .92); border-bottom: 1px solid #e5e5de;
 }
 .document-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.document-title h1 { max-width: 400px; margin: 0; overflow: hidden; font-size: 16px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.save-state { display: block; margin-top: 2px; color: #999b92; font-size: 11px; }
+.document-heading { min-width: 0; }
+.document-title h1 { max-width: 520px; margin: 0; overflow: hidden; font-size: 16px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.document-meta { display: flex; align-items: center; min-width: 0; margin-top: 2px; color: #999b92; font-size: 11px; }
+.document-path { max-width: 420px; overflow: hidden; color: #7d8077; text-overflow: ellipsis; white-space: nowrap; }
+.meta-separator { flex: 0 0 auto; margin: 0 6px; color: #b6b8b0; }
+.save-state { flex: 0 0 auto; color: #999b92; font-size: 11px; }
 .save-state.error { color: #b54d45; }
 .toolbar-actions { display: flex; align-items: center; gap: 10px; }
 .icon-button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; color: #6d7066; background: transparent; border: 1px solid #dedfd7; border-radius: 8px; cursor: pointer; }
@@ -152,7 +156,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
   .mode-split .preview-pane { display: none; }
 }
 
-.readonly-state { display: block; margin-top: 2px; color: #7d8075; font-size: 11px; }
+.readonly-state { flex: 0 0 auto; color: #7d8075; font-size: 11px; }
 .image-preview { flex: 1; min-height: 0; overflow: auto; padding: 36px; background: #f2f2ed; }
 .image-preview-canvas { display: grid; min-width: min-content; min-height: 100%; place-items: center; }
 .image-preview img { display: block; max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 12px 36px rgba(31, 32, 27, .16); }

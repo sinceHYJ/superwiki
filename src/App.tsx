@@ -205,6 +205,10 @@ function App() {
     }
   };
 
+  const activeRelativePath = activeFile
+    ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
+    : null;
+
   return (
     <main className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
       <aside className="sidebar">
@@ -266,10 +270,16 @@ function App() {
             <button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen((value) => !value)} title="切换目录">
               <PanelLeftClose size={18} />
             </button>
-            <div>
+            <div className="document-heading">
               <h1>{activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
-              {activeFile?.kind === "markdown" && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
-              {activeFile?.kind === "image" && <span className="readonly-state">图片预览 · 只读</span>}
+              {activeFile && activeRelativePath && (
+                <div className="document-meta">
+                  <span className="document-path" title={activeRelativePath}>{activeRelativePath}</span>
+                  <span className="meta-separator">·</span>
+                  {activeFile.kind === "markdown" && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
+                  {activeFile.kind === "image" && <span className="readonly-state">图片预览 · 只读</span>}
+                </div>
+              )}
             </div>
           </div>
 
@@ -411,6 +421,13 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
       <span>{node.name}</span>
     </button>
   );
+}
+
+function workspaceRelativePath(root: string, path: string, fallbackName: string) {
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedPath = path.replace(/\\/g, "/");
+  const prefix = `${normalizedRoot}/`;
+  return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : fallbackName;
 }
 
 function imageMimeType(name: string) {
