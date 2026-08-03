@@ -25,6 +25,7 @@
     "@codemirror/legacy-modes": "^6.5.3",
     "@milkdown/crepe": "^7.21.3",
     "@milkdown/react": "^7.21.3",
+    "@plantuml/core": "^1.2026.6",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "lucide-react": "^1.28.0",

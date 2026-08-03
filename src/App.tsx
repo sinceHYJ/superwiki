@@ -20,6 +20,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import MermaidDiagram from "./MermaidDiagram";
 import { isMermaidLanguage } from "./mermaidRenderer";
+import PlantUmlDiagram from "./PlantUmlDiagram";
+import { isPlantUmlLanguage } from "./plantumlRenderer";
 import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
 import "./App.css";
 
@@ -887,9 +889,9 @@ const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, 
       components={{
         code: ({ className, children, ...props }) => {
           const language = /(?:^|\s)language-([^\s]+)/.exec(className ?? "")?.[1];
-          if (isMermaidLanguage(language)) {
-            return <MermaidDiagram source={String(children).replace(/\n$/, "")} />;
-          }
+          const source = String(children).replace(/\n$/, "");
+          if (isMermaidLanguage(language)) return <MermaidDiagram source={source} />;
+          if (isPlantUmlLanguage(language)) return <PlantUmlDiagram source={source} />;
 
           return <code className={className} {...props}>{children}</code>;
         },

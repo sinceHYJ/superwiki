@@ -170,7 +170,8 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .image-preview img { display: block; max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 12px 36px rgba(31, 32, 27, .16); }
 .editor-loading { display: grid; height: calc(100% - 34px); place-items: center; color: #8a8c83; font-size: 12px; background: #fff; }
 
-.mermaid-diagram {
+.mermaid-diagram,
+.plantuml-diagram {
   display: flex;
   justify-content: center;
   min-width: min-content;
@@ -182,6 +183,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
   border-radius: 10px;
 }
 .mermaid-diagram svg,
+.plantuml-diagram svg,
 .wysiwyg-editor .milkdown .milkdown-code-block .preview svg {
   display: block;
   max-width: 100%;
@@ -189,14 +191,19 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 }
 .markdown-body pre:has(> .mermaid-diagram),
 .markdown-body pre:has(> .mermaid-error),
-.markdown-body pre:has(> .mermaid-loading) {
+.markdown-body pre:has(> .mermaid-loading),
+.markdown-body pre:has(> .plantuml-diagram),
+.markdown-body pre:has(> .plantuml-error),
+.markdown-body pre:has(> .plantuml-loading) {
   padding: 0;
   color: inherit;
   background: transparent;
   border-radius: 0;
 }
 .mermaid-loading,
-.mermaid-error {
+.mermaid-error,
+.plantuml-loading,
+.plantuml-error {
   padding: 14px 16px;
   color: #73766c;
   font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -208,7 +215,8 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
   border: 1px solid #e2e3da;
   border-radius: 8px;
 }
-.mermaid-error {
+.mermaid-error,
+.plantuml-error {
   display: grid;
   gap: 4px;
   color: #8d302b;

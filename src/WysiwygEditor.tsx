@@ -12,6 +12,7 @@ import { topBar } from "@milkdown/crepe/feature/top-bar";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
 import { isMermaidLanguage, mermaidErrorMessage, renderMermaid } from "./mermaidRenderer";
+import { isPlantUmlLanguage, plantUmlErrorMessage, renderPlantUml } from "./plantumlRenderer";
 import { proxyWorkspaceImage, uploadWorkspaceImage } from "./workspaceImages";
 import "@milkdown/crepe/theme/common/reset.css";
 import "@milkdown/crepe/theme/common/prosemirror.css";
@@ -75,16 +76,21 @@ function WysiwygEditorInner({
         copyText: "复制",
         previewToggleText: (previewOnly) => previewOnly ? "编辑" : "隐藏预览",
         previewLabel: "图表预览",
-        previewLoading: "正在渲染 Mermaid 图表…",
+        previewLoading: "正在渲染图表…",
         renderPreview: (language, markdown, applyPreview) => {
-          if (!isMermaidLanguage(language)) return null;
+          const renderer = isMermaidLanguage(language)
+            ? { name: "Mermaid", render: renderMermaid, errorMessage: mermaidErrorMessage, errorClass: "mermaid-error" }
+            : isPlantUmlLanguage(language)
+              ? { name: "PlantUML", render: renderPlantUml, errorMessage: plantUmlErrorMessage, errorClass: "plantuml-error" }
+              : null;
+          if (!renderer) return null;
 
-          void renderMermaid(markdown)
+          void renderer.render(markdown)
             .then(applyPreview)
             .catch((error: unknown) => {
               const message = document.createElement("div");
-              message.className = "mermaid-error";
-              message.textContent = `Mermaid 图表渲染失败：${mermaidErrorMessage(error)}`;
+              message.className = renderer.errorClass;
+              message.textContent = `${renderer.name} 图表渲染失败：${renderer.errorMessage(error)}`;
               applyPreview(message);
             });
         },

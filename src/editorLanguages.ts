@@ -7,6 +7,11 @@ export const supportedCodeLanguages = [
     load: async () => (await import("@codemirror/lang-markdown")).markdown(),
   }),
   LanguageDescription.of({
+    name: "PlantUML",
+    alias: ["plantuml", "puml"],
+    load: async () => (await import("@codemirror/lang-markdown")).markdown(),
+  }),
+  LanguageDescription.of({
     name: "JavaScript",
     alias: ["js", "javascript", "node"],
     extensions: ["js", "mjs", "cjs"],
