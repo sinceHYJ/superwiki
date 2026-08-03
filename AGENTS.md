@@ -113,7 +113,7 @@ open({ directory: true, multiple: false })
 - 编辑区使用 Milkdown Crepe 所见即所得模式，标题、列表、粗体、引用和表格直接按格式显示。
 - 文件落盘内容仍然是 Markdown，不得改成 HTML 或编辑器私有 JSON。
 - `WysiwygEditor` 通过 `onReady` 暴露同步读取 Markdown 的函数，防止快速切换时丢失尚未触发 listener 的输入。
-- Crepe 仅启用当前需要的格式、列表、链接、表格、工具栏和代码块功能；不要无需求启用 AI、图片上传或 LaTeX。
+- Crepe 仅启用当前需要的格式、列表、链接、图片上传、表格、工具栏和代码块功能；不要无需求启用 AI 或 LaTeX。
 - 代码块语言统一维护在 `editorLanguages.ts`，只能按需加载明确支持的语言，禁止恢复全量 `@codemirror/language-data`。
 - 当前代码高亮语言：JavaScript、TypeScript、JSX、TSX、Rust、Python、Java、Go、HTML、CSS、JSON、YAML、TOML、Markdown、SQL、Shell。
 - `react-markdown` 独立预览必须保留。
@@ -220,6 +220,7 @@ Rust 返回的数据使用 Serde 序列化：
 - 打开和记住一个本地文件夹。
 - 树形展示目录。
 - 读取、编辑和保存已有 Markdown 文件。
+- 从编辑器上传图片到当前 Markdown 文件同级的 `assets/` 目录，并插入相对路径。
 - 只读预览 PNG、JPEG、GIF、WebP、SVG、BMP 和 ICO 图片。
 - 编辑、分栏和预览模式。
 - GFM 表格、任务列表、删除线等 Markdown 扩展。
@@ -229,7 +230,8 @@ Rust 返回的数据使用 Serde 序列化：
 - 新建、删除、重命名或移动文件。
 - 多工作区或多标签页。
 - 全文搜索。
-- 图片创建、编辑或资源管理。
+- 图片编辑或完整的资源管理。
+- 从 Markdown 中删除图片节点时，不会同步删除 `assets/` 目录中的实际图片文件；目前需要用户手动删除。
 - Git 集成或云同步。
 - 非 Markdown 文件编辑。
 - HTTP API、数据库或后台常驻服务。

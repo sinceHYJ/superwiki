@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
 import "./App.css";
 
 type FileTreeNode = {
@@ -228,6 +229,15 @@ function App() {
     editorMarkdownRef.current = getMarkdown;
   }, []);
 
+  const handleImageUploaded = useCallback(() => {
+    const root = activeFileRef.current?.root;
+    if (!root) return;
+
+    void invoke<WorkspaceTree>("list_workspace", { root })
+      .then(setWorkspace)
+      .catch((reason) => setError(`无法刷新目录：${String(reason)}`));
+  }, []);
+
   const openTreeFile = useCallback((file: FileTreeNode) => {
     if (!workspace) return;
     void openFile({
@@ -362,9 +372,12 @@ function App() {
                   <WysiwygEditor
                     key={`${activeFile.path}:${editorVersion}`}
                     documentId={`${activeFile.path}:${editorVersion}`}
+                    workspaceRoot={activeFile.root}
+                    documentPath={activeFile.path}
                     initialValue={content}
                     onChange={handleEditorChange}
                     onReady={handleEditorReady}
+                    onImageUploaded={handleImageUploaded}
                   />
                 </Suspense>
               </section>
@@ -374,7 +387,11 @@ function App() {
               <section className="preview-pane" aria-label="Markdown 预览">
                 <div className="pane-label">预览</div>
                 <article className="markdown-body">
-                  <MarkdownPreview content={previewContent} />
+                  <MarkdownPreview
+                    content={previewContent}
+                    workspaceRoot={activeFile.root}
+                    documentPath={activeFile.path}
+                  />
                 </article>
               </section>
             )}
@@ -463,23 +480,64 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
 
 const MemoizedTreeNode = memo(TreeNode);
 
-const MarkdownPreview = memo(function MarkdownPreview({ content }: { content: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
+type MarkdownPreviewProps = {
+  content: string;
+  workspaceRoot: string;
+  documentPath: string;
+};
+
+const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, documentPath }: MarkdownPreviewProps) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        img: ({ src, alt }) => (
+          <WorkspaceMarkdownImage
+            source={src}
+            alt={alt ?? ""}
+            workspaceRoot={workspaceRoot}
+            documentPath={documentPath}
+          />
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 });
+
+function WorkspaceMarkdownImage({ source, alt, workspaceRoot, documentPath }: {
+  source?: string;
+  alt: string;
+  workspaceRoot: string;
+  documentPath: string;
+}) {
+  const [resolvedSource, setResolvedSource] = useState("");
+
+  useEffect(() => {
+    setResolvedSource("");
+    if (!source) return;
+    let cancelled = false;
+    const cache = new Map<string, string>();
+    void proxyWorkspaceImage(workspaceRoot, documentPath, source, cache)
+      .then((url) => { if (!cancelled) setResolvedSource(url); })
+      .catch(() => { if (!cancelled) setResolvedSource(""); });
+    return () => {
+      cancelled = true;
+      for (const url of cache.values()) URL.revokeObjectURL(url);
+    };
+  }, [documentPath, source, workspaceRoot]);
+
+  return resolvedSource
+    ? <img src={resolvedSource} alt={alt} />
+    : <span className="markdown-image-loading">图片加载中…</span>;
+}
 
 function workspaceRelativePath(root: string, path: string, fallbackName: string) {
   const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
   const normalizedPath = path.replace(/\\/g, "/");
   const prefix = `${normalizedRoot}/`;
   return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : fallbackName;
-}
-
-function imageMimeType(name: string) {
-  const extension = name.split(".").pop()?.toLowerCase();
-  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
-  if (extension === "svg") return "image/svg+xml";
-  if (extension === "ico") return "image/x-icon";
-  return `image/${extension ?? "png"}`;
 }
 
 function saveLabel(state: SaveState) {

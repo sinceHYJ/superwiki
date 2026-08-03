@@ -2,6 +2,7 @@ import { memo, useEffect, useRef } from "react";
 import { CrepeBuilder } from "@milkdown/crepe/builder";
 import { codeMirror } from "@milkdown/crepe/feature/code-mirror";
 import { cursor } from "@milkdown/crepe/feature/cursor";
+import { imageBlock } from "@milkdown/crepe/feature/image-block";
 import { linkTooltip } from "@milkdown/crepe/feature/link-tooltip";
 import { listItem } from "@milkdown/crepe/feature/list-item";
 import { placeholder } from "@milkdown/crepe/feature/placeholder";
@@ -10,10 +11,12 @@ import { toolbar } from "@milkdown/crepe/feature/toolbar";
 import { topBar } from "@milkdown/crepe/feature/top-bar";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
+import { proxyWorkspaceImage, uploadWorkspaceImage } from "./workspaceImages";
 import "@milkdown/crepe/theme/common/reset.css";
 import "@milkdown/crepe/theme/common/prosemirror.css";
 import "@milkdown/crepe/theme/common/code-mirror.css";
 import "@milkdown/crepe/theme/common/cursor.css";
+import "@milkdown/crepe/theme/common/image-block.css";
 import "@milkdown/crepe/theme/common/link-tooltip.css";
 import "@milkdown/crepe/theme/common/list-item.css";
 import "@milkdown/crepe/theme/common/placeholder.css";
@@ -24,14 +27,26 @@ import "@milkdown/crepe/theme/frame.css";
 
 type WysiwygEditorProps = {
   documentId: string;
+  workspaceRoot: string;
+  documentPath: string;
   initialValue: string;
   onChange: (markdown: string) => void;
   onReady: (getMarkdown: (() => string) | null) => void;
+  onImageUploaded: () => void;
 };
 
-function WysiwygEditorInner({ initialValue, onChange, onReady }: WysiwygEditorProps) {
+function WysiwygEditorInner({
+  workspaceRoot,
+  documentPath,
+  initialValue,
+  onChange,
+  onReady,
+  onImageUploaded,
+}: WysiwygEditorProps) {
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
+  const onImageUploadedRef = useRef(onImageUploaded);
+  const imageUrlCache = useRef(new Map<string, string>());
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -40,6 +55,15 @@ function WysiwygEditorInner({ initialValue, onChange, onReady }: WysiwygEditorPr
   useEffect(() => {
     onReadyRef.current = onReady;
   }, [onReady]);
+
+  useEffect(() => {
+    onImageUploadedRef.current = onImageUploaded;
+  }, [onImageUploaded]);
+
+  useEffect(() => () => {
+    for (const url of imageUrlCache.current.values()) URL.revokeObjectURL(url);
+    imageUrlCache.current.clear();
+  }, []);
 
   useEditor((root) => {
     const crepe = new CrepeBuilder({ root, defaultValue: initialValue })
@@ -51,6 +75,20 @@ function WysiwygEditorInner({ initialValue, onChange, onReady }: WysiwygEditorPr
         previewToggleText: (previewOnly) => previewOnly ? "编辑" : "隐藏预览",
       })
       .addFeature(cursor)
+      .addFeature(imageBlock, {
+        onUpload: async (file) => {
+          const source = await uploadWorkspaceImage(workspaceRoot, documentPath, file);
+          onImageUploadedRef.current();
+          return source;
+        },
+        proxyDomURL: (url) => proxyWorkspaceImage(workspaceRoot, documentPath, url, imageUrlCache.current),
+        inlineUploadButton: "上传图片",
+        inlineUploadPlaceholderText: "或粘贴图片链接",
+        blockUploadButton: "上传图片",
+        blockUploadPlaceholderText: "或粘贴图片链接",
+        blockCaptionPlaceholderText: "图片说明",
+        blockConfirmButton: "确认",
+      })
       .addFeature(listItem)
       .addFeature(linkTooltip)
       .addFeature(placeholder, {

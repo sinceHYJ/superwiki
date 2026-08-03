@@ -1,5 +1,9 @@
-use serde::Serialize;
-use std::{fs, path::Path};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs::{self, OpenOptions},
+    io::{ErrorKind, Write},
+    path::{Path, PathBuf},
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +21,14 @@ struct WorkspaceTree {
     root: String,
     name: String,
     children: Vec<FileTreeNode>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageUploadMetadata {
+    root: String,
+    document_path: String,
+    file_name: String,
 }
 
 fn is_markdown(path: &Path) -> bool {
@@ -117,6 +129,138 @@ fn save_workspace_file(root: String, path: String, content: String) -> Result<()
     fs::write(path, content).map_err(|error| format!("无法保存文件：{error}"))
 }
 
+fn sanitize_image_name(file_name: &str) -> Result<String, String> {
+    let base_name = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "图片文件名无效".to_string())?;
+    let path = Path::new(base_name);
+    if !is_image(path) {
+        return Err("不支持该图片格式".into());
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "图片扩展名无效".to_string())?
+        .to_ascii_lowercase();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image");
+    let sanitized_stem: String = stem
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let sanitized_stem = sanitized_stem.trim_matches('-');
+    Ok(format!(
+        "{}.{}",
+        if sanitized_stem.is_empty() {
+            "image"
+        } else {
+            sanitized_stem
+        },
+        extension
+    ))
+}
+
+fn unique_image_path(assets_dir: &Path, file_name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    let path = Path::new(file_name);
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("image");
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("png");
+
+    for index in 0.. {
+        let candidate_name = if index == 0 {
+            file_name.to_string()
+        } else {
+            format!("{stem}-{index}.{extension}")
+        };
+        let candidate = assets_dir.join(candidate_name);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(bytes) {
+                    let _ = fs::remove_file(&candidate);
+                    return Err(format!("无法保存图片：{error}"));
+                }
+                return Ok(candidate);
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("无法保存图片：{error}")),
+        }
+    }
+    unreachable!()
+}
+
+fn save_uploaded_image(metadata: ImageUploadMetadata, bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("图片内容为空".into());
+    }
+    let root = fs::canonicalize(&metadata.root).map_err(|error| error.to_string())?;
+    let document_path = workspace_file_path(&metadata.root, &metadata.document_path)?;
+    if !is_markdown(&document_path) {
+        return Err("图片只能上传到 Markdown 文档".into());
+    }
+
+    let document_dir = document_path
+        .parent()
+        .ok_or_else(|| "无法确定文档目录".to_string())?;
+    let assets_dir = document_dir.join("assets");
+    fs::create_dir_all(&assets_dir).map_err(|error| format!("无法创建 assets 目录：{error}"))?;
+    let assets_dir =
+        fs::canonicalize(&assets_dir).map_err(|error| format!("无法访问 assets 目录：{error}"))?;
+    if !assets_dir.starts_with(&root) || !assets_dir.is_dir() {
+        return Err("图片目录不在已打开的目录中".into());
+    }
+
+    let file_name = sanitize_image_name(&metadata.file_name)?;
+    let destination = unique_image_path(&assets_dir, &file_name, bytes)?;
+    let saved_name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "图片文件名无效".to_string())?;
+    Ok(format!("assets/{saved_name}"))
+}
+
+fn parse_upload_payload(body: &[u8]) -> Result<(ImageUploadMetadata, &[u8]), String> {
+    if body.len() < 4 {
+        return Err("图片上传请求无效".into());
+    }
+    let metadata_length = u32::from_be_bytes(body[0..4].try_into().unwrap()) as usize;
+    let metadata_end = 4usize
+        .checked_add(metadata_length)
+        .filter(|end| *end <= body.len())
+        .ok_or_else(|| "图片上传元数据无效".to_string())?;
+    let metadata = serde_json::from_slice(&body[4..metadata_end])
+        .map_err(|error| format!("无法解析图片上传元数据：{error}"))?;
+    Ok((metadata, &body[metadata_end..]))
+}
+
+#[tauri::command]
+fn upload_workspace_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("图片上传请求必须使用二进制数据".into());
+    };
+    let (metadata, image_bytes) = parse_upload_payload(body)?;
+    save_uploaded_image(metadata, image_bytes)
+}
+
 #[tauri::command]
 fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Response, String> {
     let path = workspace_file_path(&root, &path)?;
@@ -136,7 +280,8 @@ pub fn run() {
             list_workspace,
             read_workspace_file,
             save_workspace_file,
-            read_workspace_image
+            read_workspace_image,
+            upload_workspace_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -156,6 +301,63 @@ mod tests {
         assert!(is_image(Path::new("photo.JPEG")));
         assert!(is_image(Path::new("icon.svg")));
         assert!(!is_image(Path::new("video.mp4")));
+    }
+
+    #[test]
+    fn parses_binary_image_upload_payload() {
+        let metadata = ImageUploadMetadata {
+            root: "/notes".into(),
+            document_path: "/notes/doc.md".into(),
+            file_name: "image.png".into(),
+        };
+        let metadata_bytes = serde_json::to_vec(&metadata).unwrap();
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&(metadata_bytes.len() as u32).to_be_bytes());
+        payload.extend_from_slice(&metadata_bytes);
+        payload.extend_from_slice(b"image-bytes");
+
+        let (parsed, bytes) = parse_upload_payload(&payload).unwrap();
+        assert_eq!(parsed.root, "/notes");
+        assert_eq!(parsed.document_path, "/notes/doc.md");
+        assert_eq!(parsed.file_name, "image.png");
+        assert_eq!(bytes, b"image-bytes");
+    }
+
+    #[test]
+    fn creates_unique_relative_image_paths() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-upload-{unique}"));
+        let docs = root.join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let document = docs.join("note.md");
+        fs::write(&document, "# note").unwrap();
+
+        let metadata = || ImageUploadMetadata {
+            root: root.to_string_lossy().into_owned(),
+            document_path: document.to_string_lossy().into_owned(),
+            file_name: "示例 image.png".into(),
+        };
+        assert_eq!(
+            save_uploaded_image(metadata(), b"first").unwrap(),
+            "assets/示例-image.png"
+        );
+        assert_eq!(
+            save_uploaded_image(metadata(), b"second").unwrap(),
+            "assets/示例-image-1.png"
+        );
+        assert_eq!(
+            fs::read(docs.join("assets/示例-image.png")).unwrap(),
+            b"first"
+        );
+        assert_eq!(
+            fs::read(docs.join("assets/示例-image-1.png")).unwrap(),
+            b"second"
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
