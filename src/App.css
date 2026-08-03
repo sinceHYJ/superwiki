@@ -98,7 +98,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 
 .workspace { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .toolbar {
-  display: flex; align-items: center; justify-content: space-between; height: 70px; padding: 0 22px;
+  display: flex; align-items: center; justify-content: space-between; height: 58px; padding: 0 22px;
   background: rgba(251, 251, 248, .92); border-bottom: 1px solid #e5e5de;
 }
 .document-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -137,9 +137,20 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 
 .wysiwyg-editor { height: 100%; overflow: auto; background: #fff; }
 .wysiwyg-editor .milkdown { min-height: 100%; color: #37382f; background: #fff; --crepe-color-background: #fff; --crepe-color-surface: #f7f7f2; --crepe-color-surface-low: #eeeee8; --crepe-color-on-background: #2e3028; --crepe-color-on-surface: #2e3028; --crepe-color-on-surface-variant: #64675d; --crepe-color-outline: #c8cac0; --crepe-color-primary: #667a1e; --crepe-color-secondary: #e4edb9; --crepe-color-on-secondary: #303716; --crepe-color-hover: #f2f5e4; --crepe-color-selected: #e8efc9; }
-.wysiwyg-editor .milkdown .ProseMirror { box-sizing: border-box; width: min(100%, 780px); min-height: 100%; margin: 0 auto; padding: 34px 42px 80px; color: #34352e; font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-size: 16px; line-height: 1.78; outline: none; }
+.wysiwyg-editor .milkdown .ProseMirror { box-sizing: border-box; width: min(100%, 780px); min-height: 100%; margin: 0 auto; padding: 12px 42px 80px; color: #34352e; font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-size: 16px; line-height: 1.78; outline: none; }
 .wysiwyg-editor .milkdown .milkdown-toolbar { position: sticky; z-index: 4; top: 0; }
+.wysiwyg-editor .milkdown .milkdown-top-bar { min-height: 36px; }
+.wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-heading-selector { padding: 2px 6px; }
+.wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-item { margin: 2px 6px; }
+.wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-divider { margin: 6px 10px; }
 .wysiwyg-editor .milkdown h1, .wysiwyg-editor .milkdown h2, .wysiwyg-editor .milkdown h3 { color: #23241f; letter-spacing: -.025em; }
+.wysiwyg-editor .milkdown .ProseMirror h1 { font-size: 36px; }
+.wysiwyg-editor .milkdown .ProseMirror > h1:first-child { margin-top: 0; }
+.wysiwyg-editor .milkdown .ProseMirror h2 { font-size: 32px; }
+.wysiwyg-editor .milkdown .ProseMirror h3 { font-size: 28px; }
+.wysiwyg-editor .milkdown .ProseMirror h4 { font-size: 24px; }
+.wysiwyg-editor .milkdown .ProseMirror h5 { font-size: 21px; }
+.wysiwyg-editor .milkdown .ProseMirror h6 { font-size: 17px; }
 
 .markdown-body { max-width: 760px; margin: 0 auto; padding: 14px 42px 80px; color: #34352e; font-size: 16px; line-height: 1.78; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #23241f; line-height: 1.3; letter-spacing: -.025em; }
