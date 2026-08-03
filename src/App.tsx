@@ -1,8 +1,7 @@
-import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  BookOpen,
   ChevronRight,
   Columns2,
   File,
@@ -50,6 +49,11 @@ type ActiveFile = {
 type ViewMode = "editor" | "split" | "preview";
 type SaveState = "saved" | "saving" | "error";
 
+type DocumentHeading = {
+  level: number;
+  text: string;
+};
+
 type DirectoryContextMenu = {
   node: FileTreeNode;
   x: number;
@@ -92,6 +96,8 @@ function App() {
   const contentRef = useRef("");
   const imageUrlRef = useRef<string | null>(null);
   const editorMarkdownRef = useRef<(() => string) | null>(null);
+  const editorPaneRef = useRef<HTMLElement>(null);
+  const previewPaneRef = useRef<HTMLElement>(null);
   const saveTimerRef = useRef<number | null>(null);
 
   const replaceImageUrl = useCallback((url: string | null) => {
@@ -373,11 +379,12 @@ function App() {
     return true;
   }, [flushPendingSave, openFile, workspace]);
 
-  const renameDirectory = useCallback(async (node: FileTreeNode, inputName: string) => {
+  const renameTreeNode = useCallback(async (node: FileTreeNode, inputName: string) => {
     if (!workspace) return false;
     const newName = inputName.trim();
+    const entryLabel = node.isDir ? "文件夹" : "文件";
     if (!newName) {
-      setError("文件夹名称不能为空");
+      setError(`${entryLabel}名称不能为空`);
       return false;
     }
     if (newName === node.name) {
@@ -389,17 +396,24 @@ function App() {
       setError("");
       await flushPendingSave();
       setSaveState("saved");
-      const renamedPath = await invoke<string>("rename_workspace_directory", {
-        root: workspace.root,
-        path: node.path,
-        newName,
-      });
+      const renamedPath = await invoke<string>(
+        node.isDir ? "rename_workspace_directory" : "rename_workspace_file",
+        { root: workspace.root, path: node.path, newName },
+      );
 
       const currentFile = activeFileRef.current;
-      if (currentFile && isPathInsideDirectory(currentFile.path, node.path)) {
+      if (currentFile && node.isDir && isPathInsideDirectory(currentFile.path, node.path)) {
         const updatedFile = {
           ...currentFile,
           path: replaceDirectoryPath(currentFile.path, node.path, renamedPath),
+        };
+        activeFileRef.current = updatedFile;
+        setActiveFile(updatedFile);
+      } else if (currentFile?.path === node.path) {
+        const updatedFile = {
+          ...currentFile,
+          path: renamedPath,
+          name: pathFileName(renamedPath),
         };
         activeFileRef.current = updatedFile;
         setActiveFile(updatedFile);
@@ -410,12 +424,26 @@ function App() {
       setRenamingPath(null);
       return true;
     } catch (reason) {
-      setError(`无法重命名文件夹：${String(reason)}`);
+      setError(`无法重命名${entryLabel}：${String(reason)}`);
       return false;
     }
   }, [flushPendingSave, workspace]);
 
   const previewContent = useDeferredValue(content);
+  const documentHeadings = useMemo(() => extractDocumentHeadings(previewContent), [previewContent]);
+
+  const scrollToHeading = useCallback((index: number) => {
+    const selector = "h1, h2, h3, h4, h5, h6";
+    const scrollInPane = (pane: HTMLElement | null) => {
+      pane?.querySelectorAll<HTMLElement>(selector)[index]?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    };
+
+    if (viewMode !== "preview") scrollInPane(editorPaneRef.current);
+    if (viewMode !== "editor") scrollInPane(previewPaneRef.current);
+  }, [viewMode]);
 
   const changeViewMode = (mode: ViewMode) => {
     if (mode === "preview") syncEditorContent();
@@ -430,7 +458,7 @@ function App() {
     <main className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark"><BookOpen size={18} /></span>
+          <span className="brand-mark"><img src="/superwiki-logo.png" alt="" /></span>
           <span>SuperWiki</span>
         </div>
 
@@ -488,7 +516,7 @@ function App() {
                   onOpen={openTreeFile}
                   onContextMenu={openDirectoryContextMenu}
                   onAdd={openCreateEntryMenu}
-                  onRename={renameDirectory}
+                  onRename={renameTreeNode}
                   onCreateEntry={createWorkspaceEntry}
                   onCancelRename={() => setRenamingPath(null)}
                   onCancelCreate={() => setCreatingEntry(null)}
@@ -552,6 +580,7 @@ function App() {
             <button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen((value) => !value)} title="切换目录">
               <PanelLeftClose size={18} />
             </button>
+            <img className="toolbar-logo" src="/superwiki-logo.png" alt="" />
             <div className="document-heading">
               <h1>{activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
               {activeFile && activeRelativePath && (
@@ -580,7 +609,7 @@ function App() {
 
         {!workspace && !workspaceLoading && (
           <EmptyState
-            icon={<FolderOpen size={32} />}
+            icon={<img className="welcome-logo" src="/superwiki-logo.png" alt="SuperWiki" />}
             title="打开一个文件夹开始使用"
             description="选择包含 Markdown 或图片文件的本地文件夹，目录会显示在左侧。"
             action="打开文件夹"
@@ -603,7 +632,7 @@ function App() {
         {activeFile?.kind === "markdown" && (
           <div className={`editor-layout mode-${viewMode}`}>
             {viewMode !== "preview" && (
-              <section className="editor-pane" aria-label="Markdown 所见即所得编辑器">
+              <section ref={editorPaneRef} className="editor-pane" aria-label="Markdown 所见即所得编辑器">
                 <Suspense fallback={<div className="editor-loading">正在加载所见即所得编辑器…</div>}>
                   <WysiwygEditor
                     key={`${activeFile.path}:${editorVersion}`}
@@ -620,7 +649,7 @@ function App() {
             )}
 
             {viewMode !== "editor" && (
-              <section className="preview-pane" aria-label="Markdown 预览">
+              <section ref={previewPaneRef} className="preview-pane" aria-label="Markdown 预览">
                 <div className="pane-label">预览</div>
                 <article className="markdown-body">
                   <MarkdownPreview
@@ -631,6 +660,8 @@ function App() {
                 </article>
               </section>
             )}
+
+            <DocumentOutline headings={documentHeadings} onSelect={scrollToHeading} />
           </div>
         )}
 
@@ -716,6 +747,32 @@ function TreeNode({
     setExpanded(true);
   }, [creatingHere]);
 
+  const renameInput = (
+    <input
+      ref={renameInputRef}
+      className="tree-rename-input"
+      value={renameValue}
+      aria-label={`重命名 ${node.name}`}
+      onChange={(event) => setRenameValue(event.target.value)}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Enter") event.currentTarget.blur();
+        if (event.key === "Escape") {
+          cancelledRenameRef.current = true;
+          onCancelRename();
+        }
+      }}
+      onBlur={() => {
+        if (cancelledRenameRef.current) return;
+        void onRename(node, renameValue);
+      }}
+    />
+  );
+
   if (node.isDir) {
     return (
       <details ref={detailsRef} className="tree-directory" onToggle={(event) => setExpanded(event.currentTarget.open)}>
@@ -730,31 +787,7 @@ function TreeNode({
           <ChevronRight className="tree-chevron" size={13} />
           <Folder className="folder-closed" size={15} />
           <FolderOpen className="folder-open" size={15} />
-          {renaming ? (
-            <input
-              ref={renameInputRef}
-              className="tree-rename-input"
-              value={renameValue}
-              aria-label={`重命名 ${node.name}`}
-              onChange={(event) => setRenameValue(event.target.value)}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === "Enter") event.currentTarget.blur();
-                if (event.key === "Escape") {
-                  cancelledRenameRef.current = true;
-                  onCancelRename();
-                }
-              }}
-              onBlur={() => {
-                if (cancelledRenameRef.current) return;
-                void onRename(node, renameValue);
-              }}
-            />
-          ) : <span className="tree-name">{node.name}</span>}
+          {renaming ? renameInput : <span className="tree-name">{node.name}</span>}
           {!renaming && (
             <button
               className="tree-add-button"
@@ -794,17 +827,37 @@ function TreeNode({
     );
   }
 
+  const fileRowClassName = `tree-row file ${activePath === node.path ? "active" : ""} ${node.isMarkdown || node.isImage ? "" : "unsupported"}`;
+  const fileIcon = node.isMarkdown
+    ? <FileCode2 size={14} />
+    : node.isImage
+      ? <ImageIcon size={14} />
+      : <File size={14} />;
+
+  if (renaming) {
+    return (
+      <div className={fileRowClassName} style={style}>
+        <span className="tree-spacer" />
+        {fileIcon}
+        {renameInput}
+      </div>
+    );
+  }
+
   return (
     <button
       role="treeitem"
-      className={`tree-row file ${activePath === node.path ? "active" : ""} ${node.isMarkdown || node.isImage ? "" : "unsupported"}`}
+      className={fileRowClassName}
       style={style}
-      disabled={!node.isMarkdown && !node.isImage}
-      title={node.isMarkdown || node.isImage ? node.path : "当前仅支持 Markdown 编辑和图片预览"}
-      onClick={() => onOpen(node)}
+      aria-disabled={!node.isMarkdown && !node.isImage}
+      title={node.isMarkdown || node.isImage ? node.path : "当前仅支持 Markdown 编辑和图片预览，右键可重命名"}
+      onClick={() => {
+        if (node.isMarkdown || node.isImage) onOpen(node);
+      }}
+      onContextMenu={(event) => onContextMenu(event, node)}
     >
       <span className="tree-spacer" />
-      {node.isMarkdown ? <FileCode2 size={14} /> : node.isImage ? <ImageIcon size={14} /> : <File size={14} />}
+      {fileIcon}
       <span className="tree-name">{node.name}</span>
     </button>
   );
@@ -875,6 +928,35 @@ function CreateEntryInput({ depth, kind, onCreate, onCancel }: CreateEntryInputP
 
 const MemoizedTreeNode = memo(TreeNode);
 
+type DocumentOutlineProps = {
+  headings: DocumentHeading[];
+  onSelect: (index: number) => void;
+};
+
+const DocumentOutline = memo(function DocumentOutline({ headings, onSelect }: DocumentOutlineProps) {
+  return (
+    <aside className="document-outline" aria-label="当前文档目录">
+      <div className="document-outline-title">目录</div>
+      {headings.length > 0 ? (
+        <nav className="document-outline-list">
+          {headings.map((heading, index) => (
+            <button
+              key={`${index}:${heading.level}:${heading.text}`}
+              className={`document-outline-item outline-level-${heading.level}`}
+              title={heading.text}
+              onClick={() => onSelect(index)}
+            >
+              {heading.text}
+            </button>
+          ))}
+        </nav>
+      ) : (
+        <div className="document-outline-empty">当前文档没有标题</div>
+      )}
+    </aside>
+  );
+});
+
 type MarkdownPreviewProps = {
   content: string;
   workspaceRoot: string;
@@ -934,6 +1016,63 @@ function WorkspaceMarkdownImage({ source, alt, workspaceRoot, documentPath }: {
   return resolvedSource
     ? <img src={resolvedSource} alt={alt} />
     : <span className="markdown-image-loading">图片加载中…</span>;
+}
+
+function extractDocumentHeadings(markdown: string): DocumentHeading[] {
+  const headings: DocumentHeading[] = [];
+  const lines = markdown.split(/\r?\n/);
+  let fenceCharacter = "";
+  let fenceLength = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fence = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      const marker = fence[1];
+      if (!fenceCharacter) {
+        fenceCharacter = marker[0];
+        fenceLength = marker.length;
+      } else if (marker[0] === fenceCharacter && marker.length >= fenceLength) {
+        fenceCharacter = "";
+        fenceLength = 0;
+      }
+      continue;
+    }
+    if (fenceCharacter) continue;
+
+    const content = line.replace(/^(?: {0,3}>[ \t]?)+/, "");
+    const atxHeading = /^ {0,3}(#{1,6})(?:[ \t]+|$)(.*)$/.exec(content);
+    if (atxHeading) {
+      headings.push({
+        level: atxHeading[1].length,
+        text: cleanHeadingText(atxHeading[2].replace(/[ \t]+#+[ \t]*$/, "")),
+      });
+      continue;
+    }
+
+    const nextLine = lines[index + 1]?.replace(/^(?: {0,3}>[ \t]?)+/, "");
+    const setextHeading = nextLine && /^ {0,3}(=+|-+)[ \t]*$/.exec(nextLine);
+    if (content.trim() && setextHeading) {
+      headings.push({
+        level: setextHeading[1][0] === "=" ? 1 : 2,
+        text: cleanHeadingText(content.trim()),
+      });
+      index += 1;
+    }
+  }
+
+  return headings;
+}
+
+function cleanHeadingText(text: string) {
+  const cleaned = text
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/[`*_~]/g, "")
+    .replace(/\\([\\`*{}\[\]()#+\-.!_>])/g, "$1")
+    .trim();
+  return cleaned || "未命名标题";
 }
 
 function pathFileName(path: string) {

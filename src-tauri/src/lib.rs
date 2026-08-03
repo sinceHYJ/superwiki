@@ -166,6 +166,35 @@ fn rename_workspace_directory(
 }
 
 #[tauri::command]
+fn rename_workspace_file(root: String, path: String, new_name: String) -> Result<String, String> {
+    validate_entry_name(&new_name)?;
+    let path = workspace_file_path(&root, &path)?;
+    if path
+        .file_name()
+        .is_some_and(|name| name == new_name.as_str())
+    {
+        return Ok(path.to_string_lossy().into_owned());
+    }
+
+    let destination = path
+        .parent()
+        .ok_or_else(|| "无法确定文件的上级目录".to_string())?
+        .join(new_name);
+    if is_markdown(&path) && !is_markdown(&destination) {
+        return Err("Markdown 文件重命名后必须保留 .md 或 .markdown 扩展名".into());
+    }
+    if is_image(&path) && !is_image(&destination) {
+        return Err("图片重命名后必须保留支持的图片扩展名".into());
+    }
+    if destination.exists() {
+        return Err("同名文件或文件夹已存在".into());
+    }
+
+    fs::rename(&path, &destination).map_err(|error| format!("无法重命名文件：{error}"))?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn create_workspace_directory(
     root: String,
     parent_path: String,
@@ -383,6 +412,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_workspace,
             rename_workspace_directory,
+            rename_workspace_file,
             create_workspace_directory,
             create_workspace_markdown_file,
             read_workspace_file,
@@ -535,6 +565,57 @@ mod tests {
 
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn renames_workspace_files() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-file-rename-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        let markdown = root.join("old.md");
+        fs::write(&markdown, "# note").unwrap();
+
+        let renamed = rename_workspace_file(
+            root.to_string_lossy().into_owned(),
+            markdown.to_string_lossy().into_owned(),
+            "new.md".into(),
+        )
+        .unwrap();
+
+        assert_eq!(PathBuf::from(&renamed).file_name().unwrap(), "new.md");
+        assert_eq!(fs::read_to_string(renamed).unwrap(), "# note");
+        assert!(!markdown.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refuses_invalid_file_renames() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-file-rename-errors-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        let markdown = root.join("note.md");
+        fs::write(&markdown, "# note").unwrap();
+        fs::write(root.join("existing.md"), "existing").unwrap();
+
+        let rename = |name: &str| {
+            rename_workspace_file(
+                root.to_string_lossy().into_owned(),
+                markdown.to_string_lossy().into_owned(),
+                name.into(),
+            )
+        };
+        assert!(rename("../outside.md").is_err());
+        assert!(rename("note.txt").is_err());
+        assert!(rename("existing.md").is_err());
+        assert!(markdown.is_file());
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
