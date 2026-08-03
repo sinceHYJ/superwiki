@@ -84,6 +84,10 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .tree-row.unsupported { color: #686b63; cursor: default; }
 .tree-row.unsupported:hover { color: #686b63; background: transparent; }
 .tree-spacer { flex: 0 0 13px; }
+.tree-rename-input { min-width: 0; width: 100%; height: 22px; padding: 1px 5px; color: #fff; font-size: 12px; background: #20221e; border: 1px solid #9caf47; border-radius: 4px; outline: none; }
+.directory-context-menu { position: fixed; z-index: 20; width: 140px; padding: 4px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; box-shadow: 0 8px 24px rgba(20, 21, 18, .2); }
+.directory-context-menu button { display: flex; align-items: center; gap: 7px; width: 100%; height: 30px; padding: 0 9px; color: #34352e; font-size: 12px; text-align: left; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.directory-context-menu button:hover { background: #f0f2e7; }
 
 .sidebar-footer { padding: 12px 8px 0; color: #71746b; font-size: 11px; border-top: 1px solid #3a3c36; }
 

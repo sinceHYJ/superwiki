@@ -84,7 +84,7 @@ fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
     Ok(nodes)
 }
 
-fn workspace_file_path(root: &str, path: &str) -> Result<std::path::PathBuf, String> {
+fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
 
@@ -92,6 +92,23 @@ fn workspace_file_path(root: &str, path: &str) -> Result<std::path::PathBuf, Str
         return Err("文件不在已打开的目录中".into());
     }
     Ok(path)
+}
+
+fn workspace_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
+
+    if !root.is_dir() || path == root || !path.starts_with(&root) || !path.is_dir() {
+        return Err("文件夹不在已打开的目录中".into());
+    }
+    Ok(path)
+}
+
+fn validate_directory_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Err("文件夹名称无效".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,6 +126,33 @@ fn list_workspace(root: String) -> Result<WorkspaceTree, String> {
         children: scan_directory(&root)?,
         root: root.to_string_lossy().into_owned(),
     })
+}
+
+#[tauri::command]
+fn rename_workspace_directory(
+    root: String,
+    path: String,
+    new_name: String,
+) -> Result<String, String> {
+    validate_directory_name(&new_name)?;
+    let path = workspace_directory_path(&root, &path)?;
+    if path
+        .file_name()
+        .is_some_and(|name| name == new_name.as_str())
+    {
+        return Ok(path.to_string_lossy().into_owned());
+    }
+
+    let destination = path
+        .parent()
+        .ok_or_else(|| "无法确定文件夹的上级目录".to_string())?
+        .join(new_name);
+    if destination.exists() {
+        return Err("同名文件或文件夹已存在".into());
+    }
+
+    fs::rename(&path, &destination).map_err(|error| format!("无法重命名文件夹：{error}"))?;
+    Ok(destination.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -278,6 +322,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             list_workspace,
+            rename_workspace_directory,
             read_workspace_file,
             save_workspace_file,
             read_workspace_image,
@@ -356,6 +401,61 @@ mod tests {
             fs::read(docs.join("assets/示例-image-1.png")).unwrap(),
             b"second"
         );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn renames_workspace_directory() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-rename-{unique}"));
+        let source = root.join("old-name");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("note.md"), "# note").unwrap();
+
+        let renamed = rename_workspace_directory(
+            root.to_string_lossy().into_owned(),
+            source.to_string_lossy().into_owned(),
+            "new-name".into(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            PathBuf::from(renamed),
+            fs::canonicalize(&root).unwrap().join("new-name")
+        );
+        assert!(root.join("new-name/note.md").is_file());
+        assert!(!source.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refuses_invalid_or_conflicting_directory_renames() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-rename-errors-{unique}"));
+        let source = root.join("source");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir(root.join("existing")).unwrap();
+
+        let rename = |path: &Path, name: &str| {
+            rename_workspace_directory(
+                root.to_string_lossy().into_owned(),
+                path.to_string_lossy().into_owned(),
+                name.into(),
+            )
+        };
+        assert!(rename(&source, "").is_err());
+        assert!(rename(&source, "   ").is_err());
+        assert!(rename(&source, "../outside").is_err());
+        assert!(rename(&source, "existing").is_err());
+        assert!(rename(&root, "renamed-root").is_err());
+        assert!(source.is_dir());
 
         fs::remove_dir_all(root).unwrap();
     }
