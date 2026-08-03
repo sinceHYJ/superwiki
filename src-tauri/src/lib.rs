@@ -8,6 +8,7 @@ struct FileTreeNode {
     path: String,
     is_dir: bool,
     is_markdown: bool,
+    is_image: bool,
     children: Vec<FileTreeNode>,
 }
 
@@ -23,6 +24,17 @@ fn is_markdown(path: &Path) -> bool {
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
             extension.eq_ignore_ascii_case("md") || extension.eq_ignore_ascii_case("markdown")
+        })
+}
+
+fn is_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico"
+            )
         })
 }
 
@@ -46,6 +58,7 @@ fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
             path: entry_path.to_string_lossy().into_owned(),
             is_dir,
             is_markdown: !is_dir && is_markdown(&entry_path),
+            is_image: !is_dir && is_image(&entry_path),
             children,
         });
     }
@@ -63,8 +76,8 @@ fn workspace_file_path(root: &str, path: &str) -> Result<std::path::PathBuf, Str
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
 
-    if !root.is_dir() || !path.starts_with(&root) || !path.is_file() || !is_markdown(&path) {
-        return Err("文件不在已打开的目录中，或不是 Markdown 文件".into());
+    if !root.is_dir() || !path.starts_with(&root) || !path.is_file() {
+        return Err("文件不在已打开的目录中".into());
     }
     Ok(path)
 }
@@ -88,14 +101,31 @@ fn list_workspace(root: String) -> Result<WorkspaceTree, String> {
 
 #[tauri::command]
 fn read_workspace_file(root: String, path: String) -> Result<String, String> {
-    fs::read_to_string(workspace_file_path(&root, &path)?)
-        .map_err(|error| format!("无法读取文件：{error}"))
+    let path = workspace_file_path(&root, &path)?;
+    if !is_markdown(&path) {
+        return Err("只能读取 Markdown 文件".into());
+    }
+    fs::read_to_string(path).map_err(|error| format!("无法读取文件：{error}"))
 }
 
 #[tauri::command]
 fn save_workspace_file(root: String, path: String, content: String) -> Result<(), String> {
-    fs::write(workspace_file_path(&root, &path)?, content)
-        .map_err(|error| format!("无法保存文件：{error}"))
+    let path = workspace_file_path(&root, &path)?;
+    if !is_markdown(&path) {
+        return Err("只能保存 Markdown 文件".into());
+    }
+    fs::write(path, content).map_err(|error| format!("无法保存文件：{error}"))
+}
+
+#[tauri::command]
+fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Response, String> {
+    let path = workspace_file_path(&root, &path)?;
+    if !is_image(&path) {
+        return Err("只能预览支持的图片文件".into());
+    }
+    fs::read(path)
+        .map(tauri::ipc::Response::new)
+        .map_err(|error| format!("无法读取图片：{error}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -105,7 +135,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_workspace,
             read_workspace_file,
-            save_workspace_file
+            save_workspace_file,
+            read_workspace_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -117,10 +148,14 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn recognizes_markdown_extensions() {
+    fn recognizes_supported_file_extensions() {
         assert!(is_markdown(Path::new("README.md")));
         assert!(is_markdown(Path::new("NOTE.MARKDOWN")));
         assert!(!is_markdown(Path::new("image.png")));
+        assert!(is_image(Path::new("image.png")));
+        assert!(is_image(Path::new("photo.JPEG")));
+        assert!(is_image(Path::new("icon.svg")));
+        assert!(!is_image(Path::new("video.mp4")));
     }
 
     #[test]

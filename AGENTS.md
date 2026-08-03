@@ -26,6 +26,7 @@ React / TypeScript 前端（src/）
   ├─ 当前文件和视图状态
   ├─ CodeMirror Markdown 编辑
   ├─ react-markdown 实时预览
+  ├─ 本地图片只读预览
   └─ 500ms 防抖自动保存
           │
           │ Tauri invoke
@@ -34,6 +35,7 @@ Rust 本地文件服务（src-tauri/src/lib.rs）
   ├─ list_workspace
   ├─ read_workspace_file
   ├─ save_workspace_file
+  ├─ read_workspace_image
   ├─ 路径规范化与根目录边界检查
   └─ std::fs 本地文件读写
           │
@@ -70,7 +72,7 @@ superwiki/
 ### 4.1 工作区状态
 
 - `workspace`：当前打开文件夹的完整树结构。
-- `activeFile`：当前正在编辑的 Markdown 文件。
+- `activeFile`：当前打开的 Markdown 或图片文件，并通过 `kind` 区分类型。
 - `content`：编辑器当前内容。
 - `viewMode`：`editor`、`split` 或 `preview`。
 - `saveState`：`saved`、`saving` 或 `error`。
@@ -90,7 +92,7 @@ open({ directory: true, multiple: false })
 
 - 文件夹使用原生 `<details>/<summary>` 展开和收起。
 - 连续点击中 `event.detail > 1` 时阻止第二次默认切换，避免双击后立即恢复原状态。
-- 所有文件均可显示，但只有 `.md` 和 `.markdown` 文件可以点击编辑。
+- 所有文件均可显示；`.md` 和 `.markdown` 可以编辑，常见图片格式只能预览。
 - 不要重新改成通过普通按钮反转 React 布尔状态的实现。
 
 ### 4.4 文件保存
@@ -131,7 +133,7 @@ open({ directory: true, multiple: false })
 Rust 返回的数据使用 Serde 序列化：
 
 - `WorkspaceTree`：根目录路径、目录名称和子节点。
-- `FileTreeNode`：名称、绝对路径、节点类型、是否为 Markdown、子节点。
+- `FileTreeNode`：名称、绝对路径、节点类型、是否为 Markdown、是否为支持的图片、子节点。
 - `FileTreeNode` 使用 `#[serde(rename_all = "camelCase")]` 与 TypeScript 字段对齐。
 
 ### 5.2 Tauri 命令
@@ -159,6 +161,15 @@ Rust 返回的数据使用 Serde 序列化：
 
 职责：验证路径安全后，以 UTF-8 文本读取 Markdown 文件。
 
+#### `read_workspace_image`
+
+```text
+输入：root: String, path: String
+输出：原始图片二进制响应
+```
+
+职责：验证路径安全和图片扩展名后，通过 `tauri::ipc::Response` 返回图片数据。前端将其转换为 Blob URL，并在切换文件时释放 URL。
+
 #### `save_workspace_file`
 
 ```text
@@ -176,7 +187,7 @@ Rust 返回的数据使用 Serde 序列化：
 2. 根路径必须是目录。
 3. 文件路径必须以规范化后的根路径开头。
 4. 目标必须是现有普通文件。
-5. 扩展名必须是 `.md` 或 `.markdown`，且不区分大小写。
+5. 文本读写命令只允许 `.md` / `.markdown`；图片命令只允许支持的图片扩展名。
 
 禁止：
 
@@ -184,6 +195,7 @@ Rust 返回的数据使用 Serde 序列化：
 - 绕过 `workspace_file_path` 读写文件。
 - 允许 `../`、符号链接或其他方式访问根目录之外的文件。
 - 将任意非 Markdown 文件作为 UTF-8 文本覆盖。
+- 为图片显示提供编辑或保存入口。
 
 ## 6. 当前功能边界
 
@@ -192,6 +204,7 @@ Rust 返回的数据使用 Serde 序列化：
 - 打开和记住一个本地文件夹。
 - 树形展示目录。
 - 读取、编辑和保存已有 Markdown 文件。
+- 只读预览 PNG、JPEG、GIF、WebP、SVG、BMP 和 ICO 图片。
 - 编辑、分栏和预览模式。
 - GFM 表格、任务列表、删除线等 Markdown 扩展。
 
@@ -200,7 +213,7 @@ Rust 返回的数据使用 Serde 序列化：
 - 新建、删除、重命名或移动文件。
 - 多工作区或多标签页。
 - 全文搜索。
-- 图片资源管理。
+- 图片创建、编辑或资源管理。
 - Git 集成或云同步。
 - 非 Markdown 文件编辑。
 - HTTP API、数据库或后台常驻服务。
@@ -261,9 +274,10 @@ cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
 1. 未打开文件夹时的引导页。
 2. 目录展开和收起。
-3. Markdown 文件切换前保存。
+3. Markdown 文件切换到其他 Markdown 或图片前保存。
 4. 编辑、分栏、预览三种模式。
 5. 长文档预览可以独立滚动。
+6. 图片文件只能预览，不显示编辑器和保存状态。
 
 ## 9. Git 约定
 

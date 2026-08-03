@@ -151,3 +151,8 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
   .editor-layout.mode-split { grid-template-columns: 1fr; }
   .mode-split .preview-pane { display: none; }
 }
+
+.readonly-state { display: block; margin-top: 2px; color: #7d8075; font-size: 11px; }
+.image-preview { flex: 1; min-height: 0; overflow: auto; padding: 36px; background: #f2f2ed; }
+.image-preview-canvas { display: grid; min-width: min-content; min-height: 100%; place-items: center; }
+.image-preview img { display: block; max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 12px 36px rgba(31, 32, 27, .16); }

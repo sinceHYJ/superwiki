@@ -10,6 +10,7 @@ import {
   File,
   FileCode2,
   Folder,
+  Image as ImageIcon,
   FolderOpen,
   PanelLeftClose,
   RefreshCw,
@@ -24,6 +25,7 @@ type FileTreeNode = {
   path: string;
   isDir: boolean;
   isMarkdown: boolean;
+  isImage: boolean;
   children: FileTreeNode[];
 };
 
@@ -37,6 +39,7 @@ type ActiveFile = {
   root: string;
   path: string;
   name: string;
+  kind: "markdown" | "image";
 };
 
 type ViewMode = "editor" | "split" | "preview";
@@ -48,6 +51,7 @@ function App() {
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
   const [content, setContent] = useState("");
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -56,7 +60,14 @@ function App() {
   const loadedContent = useRef("");
   const activeFileRef = useRef<ActiveFile | null>(null);
   const contentRef = useRef("");
+  const imageUrlRef = useRef<string | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+
+  const replaceImageUrl = useCallback((url: string | null) => {
+    if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+    imageUrlRef.current = url;
+    setImageUrl(url);
+  }, []);
 
   const flushPendingSave = useCallback(async () => {
     if (saveTimerRef.current !== null) {
@@ -65,7 +76,7 @@ function App() {
     }
 
     const file = activeFileRef.current;
-    if (!file || contentRef.current === loadedContent.current) return;
+    if (!file || file.kind !== "markdown" || contentRef.current === loadedContent.current) return;
 
     await invoke("save_workspace_file", {
       root: file.root,
@@ -79,20 +90,34 @@ function App() {
     try {
       setError("");
       await flushPendingSave();
-      const fileContent = await invoke<string>("read_workspace_file", {
-        root: file.root,
-        path: file.path,
-      });
-      loadedContent.current = fileContent;
-      contentRef.current = fileContent;
+
+      if (file.kind === "image") {
+        const imageData = await invoke<ArrayBuffer>("read_workspace_image", {
+          root: file.root,
+          path: file.path,
+        });
+        replaceImageUrl(URL.createObjectURL(new Blob([imageData], { type: imageMimeType(file.name) })));
+        loadedContent.current = "";
+        contentRef.current = "";
+        setContent("");
+      } else {
+        const fileContent = await invoke<string>("read_workspace_file", {
+          root: file.root,
+          path: file.path,
+        });
+        replaceImageUrl(null);
+        loadedContent.current = fileContent;
+        contentRef.current = fileContent;
+        setContent(fileContent);
+        setSaveState("saved");
+      }
+
       activeFileRef.current = file;
-      setContent(fileContent);
       setActiveFile(file);
-      setSaveState("saved");
     } catch (reason) {
       setError(String(reason));
     }
-  }, [flushPendingSave]);
+  }, [flushPendingSave, replaceImageUrl]);
 
   const loadWorkspace = useCallback(async (root: string, remember = true) => {
     setWorkspaceLoading(true);
@@ -121,11 +146,16 @@ function App() {
       contentRef.current = "";
       setActiveFile(null);
       setContent("");
+      replaceImageUrl(null);
       await loadWorkspace(selected);
     } catch (reason) {
       setError(String(reason));
     }
   };
+
+  useEffect(() => () => {
+    if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
+  }, []);
 
   useEffect(() => {
     const storedRoot = localStorage.getItem(WORKSPACE_STORAGE_KEY);
@@ -133,7 +163,7 @@ function App() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    if (!activeFile || content === loadedContent.current) return;
+    if (!activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
 
     setSaveState("saving");
     saveTimerRef.current = window.setTimeout(async () => {
@@ -166,6 +196,7 @@ function App() {
       contentRef.current = "";
       setActiveFile(null);
       setContent("");
+      replaceImageUrl(null);
       setWorkspace(null);
       setError("");
       localStorage.removeItem(WORKSPACE_STORAGE_KEY);
@@ -201,7 +232,7 @@ function App() {
           {!workspaceLoading && !workspace && (
             <button className="folder-placeholder folder-empty" onClick={() => void selectWorkspace()}>
               <FolderOpen size={18} />
-              <span><strong>尚未打开文件夹</strong><small>点击选择本地 Markdown 目录</small></span>
+              <span><strong>尚未打开文件夹</strong><small>点击选择本地文件夹</small></span>
             </button>
           )}
           {!workspaceLoading && workspace && (
@@ -213,7 +244,12 @@ function App() {
                   node={node}
                   depth={0}
                   activePath={activeFile?.path ?? null}
-                  onOpen={(file) => void openFile({ root: workspace.root, path: file.path, name: file.name })}
+                  onOpen={(file) => void openFile({
+                    root: workspace.root,
+                    path: file.path,
+                    name: file.name,
+                    kind: file.isImage ? "image" : "markdown",
+                  })}
                 />
               ))}
               {workspace.children.length === 0 && <div className="empty-directory">文件夹为空</div>}
@@ -221,7 +257,7 @@ function App() {
           )}
         </div>
 
-        <div className="sidebar-footer">本地文件夹 · Markdown</div>
+        <div className="sidebar-footer">Markdown · 图片预览</div>
       </aside>
 
       <section className="workspace">
@@ -232,11 +268,12 @@ function App() {
             </button>
             <div>
               <h1>{activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
-              {activeFile && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
+              {activeFile?.kind === "markdown" && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
+              {activeFile?.kind === "image" && <span className="readonly-state">图片预览 · 只读</span>}
             </div>
           </div>
 
-          {activeFile && (
+          {activeFile?.kind === "markdown" && (
             <div className="toolbar-actions">
               <div className="view-switcher" aria-label="视图模式">
                 <button className={viewMode === "editor" ? "active" : ""} onClick={() => setViewMode("editor")}>编辑</button>
@@ -253,7 +290,7 @@ function App() {
           <EmptyState
             icon={<FolderOpen size={32} />}
             title="打开一个文件夹开始使用"
-            description="选择包含 Markdown 文件的本地文件夹，目录会显示在左侧。"
+            description="选择包含 Markdown 或图片文件的本地文件夹，目录会显示在左侧。"
             action="打开文件夹"
             onAction={() => void selectWorkspace()}
           />
@@ -266,12 +303,12 @@ function App() {
         {workspace && !activeFile && !workspaceLoading && (
           <EmptyState
             icon={<FileCode2 size={32} />}
-            title="选择一个 Markdown 文件"
-            description="从左侧目录中选择 .md 或 .markdown 文件开始编辑。"
+            title="选择一个 Markdown 或图片文件"
+            description="从左侧目录中选择 Markdown 文件进行编辑，或选择图片进行只读预览。"
           />
         )}
 
-        {activeFile && (
+        {activeFile?.kind === "markdown" && (
           <div className={`editor-layout mode-${viewMode}`}>
             {viewMode !== "preview" && (
               <section className="editor-pane" aria-label="Markdown 编辑器">
@@ -295,6 +332,14 @@ function App() {
               </section>
             )}
           </div>
+        )}
+
+        {activeFile?.kind === "image" && imageUrl && (
+          <section className="image-preview" aria-label="图片预览">
+            <div className="image-preview-canvas">
+              <img src={imageUrl} alt={activeFile.name} />
+            </div>
+          </section>
         )}
       </section>
     </main>
@@ -355,17 +400,25 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
   return (
     <button
       role="treeitem"
-      className={`tree-row file ${activePath === node.path ? "active" : ""} ${node.isMarkdown ? "" : "unsupported"}`}
+      className={`tree-row file ${activePath === node.path ? "active" : ""} ${node.isMarkdown || node.isImage ? "" : "unsupported"}`}
       style={style}
-      disabled={!node.isMarkdown}
-      title={node.isMarkdown ? node.path : "当前仅支持编辑 Markdown 文件"}
+      disabled={!node.isMarkdown && !node.isImage}
+      title={node.isMarkdown || node.isImage ? node.path : "当前仅支持 Markdown 编辑和图片预览"}
       onClick={() => onOpen(node)}
     >
       <span className="tree-spacer" />
-      {node.isMarkdown ? <FileCode2 size={14} /> : <File size={14} />}
+      {node.isMarkdown ? <FileCode2 size={14} /> : node.isImage ? <ImageIcon size={14} /> : <File size={14} />}
       <span>{node.name}</span>
     </button>
   );
+}
+
+function imageMimeType(name: string) {
+  const extension = name.split(".").pop()?.toLowerCase();
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "svg") return "image/svg+xml";
+  if (extension === "ico") return "image/x-icon";
+  return `image/${extension ?? "png"}`;
 }
 
 function saveLabel(state: SaveState) {
