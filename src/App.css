@@ -64,13 +64,13 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .folder-empty small { color: #74776e; font-size: 10px; }
 .empty-directory { padding: 14px 8px; color: #6f7269; font-size: 11px; text-align: center; }
 .workspace-root { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 8px 6px; color: #e5e7dd; font-size: 12px; }
-.workspace-root strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-root strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree { min-width: 0; overflow: hidden; }
 .tree-row { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding-top: 0; padding-right: 7px; padding-bottom: 0; color: #aeb1a6; text-align: left; background: transparent; border: 0; border-radius: 5px; cursor: pointer; }
 .tree-row:hover { color: #fff; background: #33362f; }
 .tree-row.active { color: #fff; background: #41453a; }
 .tree-row svg { flex: 0 0 auto; }
-.tree-row span:last-child { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.tree-name { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .tree-directory > summary { list-style: none; }
 .tree-directory > summary::-webkit-details-marker { display: none; }
 .tree-directory .tree-chevron { color: #70746a; transition: transform 120ms ease; }
@@ -84,10 +84,15 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .tree-row.unsupported { color: #686b63; cursor: default; }
 .tree-row.unsupported:hover { color: #686b63; background: transparent; }
 .tree-spacer { flex: 0 0 13px; }
+.tree-add-button { display: grid; flex: 0 0 22px; place-items: center; width: 22px; height: 22px; margin-left: auto; padding: 0; color: #85897e; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.tree-add-button:hover { color: #fff; background: #484c41; }
+.tree-create-row { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding-right: 7px; color: #b9ca69; }
 .tree-rename-input { min-width: 0; width: 100%; height: 22px; padding: 1px 5px; color: #fff; font-size: 12px; background: #20221e; border: 1px solid #9caf47; border-radius: 4px; outline: none; }
+.tree-create-row .tree-rename-input::placeholder { color: #73776d; }
 .directory-context-menu { position: fixed; z-index: 20; width: 140px; padding: 4px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; box-shadow: 0 8px 24px rgba(20, 21, 18, .2); }
 .directory-context-menu button { display: flex; align-items: center; gap: 7px; width: 100%; height: 30px; padding: 0 9px; color: #34352e; font-size: 12px; text-align: left; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
 .directory-context-menu button:hover { background: #f0f2e7; }
+.create-entry-menu { width: 150px; }
 
 .sidebar-footer { padding: 12px 8px 0; color: #71746b; font-size: 11px; border-top: 1px solid #3a3c36; }
 

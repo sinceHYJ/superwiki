@@ -12,6 +12,7 @@ import {
   FolderOpen,
   PanelLeftClose,
   Pencil,
+  Plus,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -51,6 +52,19 @@ type DirectoryContextMenu = {
   y: number;
 };
 
+type CreateEntryKind = "file" | "directory";
+
+type CreateEntryMenu = {
+  parentPath: string;
+  x: number;
+  y: number;
+};
+
+type CreatingEntry = {
+  parentPath: string;
+  kind: CreateEntryKind;
+};
+
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 
@@ -60,11 +74,13 @@ function App() {
   const [content, setContent] = useState("");
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [viewMode, setViewMode] = useState<ViewMode>("editor");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
+  const [createEntryMenu, setCreateEntryMenu] = useState<CreateEntryMenu | null>(null);
+  const [creatingEntry, setCreatingEntry] = useState<CreatingEntry | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [error, setError] = useState("");
   const loadedContent = useRef("");
@@ -133,6 +149,7 @@ function App() {
         contentRef.current = fileContent;
         setContent(fileContent);
         setEditorVersion((version) => version + 1);
+        setViewMode("editor");
         setSaveState("saved");
       }
 
@@ -166,6 +183,10 @@ function App() {
     try {
       await flushPendingSave();
       activeFileRef.current = null;
+      setDirectoryContextMenu(null);
+      setCreateEntryMenu(null);
+      setCreatingEntry(null);
+      setRenamingPath(null);
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -182,19 +203,22 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!directoryContextMenu) return;
+    if (!directoryContextMenu && !createEntryMenu) return;
 
-    const closeMenu = () => setDirectoryContextMenu(null);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenu();
+    const closeMenus = () => {
+      setDirectoryContextMenu(null);
+      setCreateEntryMenu(null);
     };
-    window.addEventListener("click", closeMenu);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenus();
+    };
+    window.addEventListener("click", closeMenus);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("click", closeMenus);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [directoryContextMenu]);
+  }, [createEntryMenu, directoryContextMenu]);
 
   useEffect(() => {
     const storedRoot = localStorage.getItem(WORKSPACE_STORAGE_KEY);
@@ -231,6 +255,10 @@ function App() {
     try {
       await flushPendingSave();
       activeFileRef.current = null;
+      setDirectoryContextMenu(null);
+      setCreateEntryMenu(null);
+      setCreatingEntry(null);
+      setRenamingPath(null);
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -275,12 +303,71 @@ function App() {
   const openDirectoryContextMenu = useCallback((event: React.MouseEvent, node: FileTreeNode) => {
     event.preventDefault();
     event.stopPropagation();
+    setCreateEntryMenu(null);
+    setCreatingEntry(null);
     setDirectoryContextMenu({
       node,
       x: Math.min(event.clientX, window.innerWidth - 150),
       y: Math.min(event.clientY, window.innerHeight - 44),
     });
   }, []);
+
+  const openCreateEntryMenu = useCallback((event: React.MouseEvent, parentPath: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDirectoryContextMenu(null);
+    setRenamingPath(null);
+    setCreateEntryMenu({
+      parentPath,
+      x: Math.min(event.clientX, window.innerWidth - 160),
+      y: Math.min(event.clientY, window.innerHeight - 76),
+    });
+  }, []);
+
+  const createWorkspaceEntry = useCallback(async (
+    parentPath: string,
+    kind: CreateEntryKind,
+    inputName: string,
+  ) => {
+    if (!workspace) return false;
+    const name = inputName.trim();
+    if (!name) {
+      setError("名称不能为空");
+      return false;
+    }
+
+    let createdPath: string;
+    try {
+      setError("");
+      await flushPendingSave();
+      setSaveState("saved");
+      createdPath = await invoke<string>(
+        kind === "file" ? "create_workspace_markdown_file" : "create_workspace_directory",
+        { root: workspace.root, parentPath, name },
+      );
+    } catch (reason) {
+      setError(`无法创建${kind === "file" ? "文件" : "文件夹"}：${String(reason)}`);
+      return false;
+    }
+
+    setCreatingEntry(null);
+    try {
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
+      setWorkspace(tree);
+    } catch (reason) {
+      setError(`已创建，但无法刷新目录：${String(reason)}`);
+    }
+
+    if (kind === "file") {
+      await openFile({
+        root: workspace.root,
+        path: createdPath,
+        name: pathFileName(createdPath),
+        kind: "markdown",
+      });
+    }
+    return true;
+  }, [flushPendingSave, openFile, workspace]);
 
   const renameDirectory = useCallback(async (node: FileTreeNode, inputName: string) => {
     if (!workspace) return false;
@@ -367,7 +454,25 @@ function App() {
           )}
           {!workspaceLoading && workspace && (
             <div className="file-tree" role="tree" aria-label={`${workspace.name} 文件目录`}>
-              <div className="workspace-root"><FolderOpen size={15} /><strong>{workspace.name}</strong></div>
+              <div className="workspace-root">
+                <FolderOpen size={15} />
+                <strong>{workspace.name}</strong>
+                <button
+                  className="tree-add-button"
+                  title="在根目录中新建"
+                  onClick={(event) => openCreateEntryMenu(event, workspace.root)}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+              {creatingEntry?.parentPath === workspace.root && (
+                <CreateEntryInput
+                  depth={0}
+                  kind={creatingEntry.kind}
+                  onCreate={(name) => createWorkspaceEntry(workspace.root, creatingEntry.kind, name)}
+                  onCancel={() => setCreatingEntry(null)}
+                />
+              )}
               {workspace.children.map((node) => (
                 <MemoizedTreeNode
                   key={node.path}
@@ -375,16 +480,47 @@ function App() {
                   depth={0}
                   activePath={activeFile?.path ?? null}
                   renamingPath={renamingPath}
+                  creatingEntry={creatingEntry}
                   onOpen={openTreeFile}
                   onContextMenu={openDirectoryContextMenu}
+                  onAdd={openCreateEntryMenu}
                   onRename={renameDirectory}
+                  onCreateEntry={createWorkspaceEntry}
                   onCancelRename={() => setRenamingPath(null)}
+                  onCancelCreate={() => setCreatingEntry(null)}
                 />
               ))}
-              {workspace.children.length === 0 && <div className="empty-directory">文件夹为空</div>}
+              {workspace.children.length === 0 && creatingEntry?.parentPath !== workspace.root && (
+                <div className="empty-directory">文件夹为空</div>
+              )}
             </div>
           )}
         </div>
+
+        {createEntryMenu && (
+          <div
+            className="directory-context-menu create-entry-menu"
+            style={{ left: createEntryMenu.x, top: createEntryMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setCreatingEntry({ parentPath: createEntryMenu.parentPath, kind: "file" });
+                setCreateEntryMenu(null);
+              }}
+            >
+              <FileCode2 size={14} />文件
+            </button>
+            <button
+              onClick={() => {
+                setCreatingEntry({ parentPath: createEntryMenu.parentPath, kind: "directory" });
+                setCreateEntryMenu(null);
+              }}
+            >
+              <Folder size={14} />文件夹
+            </button>
+          </div>
+        )}
 
         {directoryContextMenu && (
           <div
@@ -531,10 +667,14 @@ type TreeNodeProps = {
   depth: number;
   activePath: string | null;
   renamingPath: string | null;
+  creatingEntry: CreatingEntry | null;
   onOpen: (node: FileTreeNode) => void;
   onContextMenu: (event: React.MouseEvent, node: FileTreeNode) => void;
+  onAdd: (event: React.MouseEvent, parentPath: string) => void;
   onRename: (node: FileTreeNode, name: string) => Promise<boolean>;
+  onCreateEntry: (parentPath: string, kind: CreateEntryKind, name: string) => Promise<boolean>;
   onCancelRename: () => void;
+  onCancelCreate: () => void;
 };
 
 function TreeNode({
@@ -542,16 +682,22 @@ function TreeNode({
   depth,
   activePath,
   renamingPath,
+  creatingEntry,
   onOpen,
   onContextMenu,
+  onAdd,
   onRename,
+  onCreateEntry,
   onCancelRename,
+  onCancelCreate,
 }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
   const cancelledRenameRef = useRef(false);
   const renaming = renamingPath === node.path;
+  const creatingHere = creatingEntry?.parentPath === node.path;
   const style = { paddingLeft: 10 + depth * 15 };
 
   useEffect(() => {
@@ -561,9 +707,15 @@ function TreeNode({
     requestAnimationFrame(() => renameInputRef.current?.select());
   }, [node.name, renaming]);
 
+  useEffect(() => {
+    if (!creatingHere || !detailsRef.current) return;
+    detailsRef.current.open = true;
+    setExpanded(true);
+  }, [creatingHere]);
+
   if (node.isDir) {
     return (
-      <details className="tree-directory" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+      <details ref={detailsRef} className="tree-directory" onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary
           className="tree-row directory"
           style={style}
@@ -599,8 +751,25 @@ function TreeNode({
                 void onRename(node, renameValue);
               }}
             />
-          ) : <span>{node.name}</span>}
+          ) : <span className="tree-name">{node.name}</span>}
+          {!renaming && (
+            <button
+              className="tree-add-button"
+              title={`在 ${node.name} 中新建`}
+              onClick={(event) => onAdd(event, node.path)}
+            >
+              <Plus size={14} />
+            </button>
+          )}
         </summary>
+        {creatingHere && creatingEntry && (
+          <CreateEntryInput
+            depth={depth + 1}
+            kind={creatingEntry.kind}
+            onCreate={(name) => onCreateEntry(node.path, creatingEntry.kind, name)}
+            onCancel={onCancelCreate}
+          />
+        )}
         {expanded && node.children.map((child) => (
           <MemoizedTreeNode
             key={child.path}
@@ -608,10 +777,14 @@ function TreeNode({
             depth={depth + 1}
             activePath={activePath}
             renamingPath={renamingPath}
+            creatingEntry={creatingEntry}
             onOpen={onOpen}
             onContextMenu={onContextMenu}
+            onAdd={onAdd}
             onRename={onRename}
+            onCreateEntry={onCreateEntry}
             onCancelRename={onCancelRename}
+            onCancelCreate={onCancelCreate}
           />
         ))}
       </details>
@@ -629,8 +802,71 @@ function TreeNode({
     >
       <span className="tree-spacer" />
       {node.isMarkdown ? <FileCode2 size={14} /> : node.isImage ? <ImageIcon size={14} /> : <File size={14} />}
-      <span>{node.name}</span>
+      <span className="tree-name">{node.name}</span>
     </button>
+  );
+}
+
+type CreateEntryInputProps = {
+  depth: number;
+  kind: CreateEntryKind;
+  onCreate: (name: string) => Promise<boolean>;
+  onCancel: () => void;
+};
+
+function CreateEntryInput({ depth, kind, onCreate, onCancel }: CreateEntryInputProps) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const style = { paddingLeft: 10 + depth * 15 };
+
+  useEffect(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const submit = async () => {
+    const name = value.trim();
+    if (!name) {
+      onCancel();
+      return;
+    }
+    if (submittingRef.current) return;
+
+    submittingRef.current = true;
+    const success = await onCreate(name);
+    submittingRef.current = false;
+    if (!success) requestAnimationFrame(() => inputRef.current?.select());
+  };
+
+  return (
+    <div className="tree-create-row" style={style}>
+      <span className="tree-spacer" />
+      {kind === "file" ? <FileCode2 size={14} /> : <Folder size={15} />}
+      <input
+        ref={inputRef}
+        className="tree-rename-input"
+        value={value}
+        placeholder={kind === "file" ? "文件名（自动补充 .md）" : "文件夹名称"}
+        aria-label={kind === "file" ? "新建 Markdown 文件" : "新建文件夹"}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void submit();
+          }
+          if (event.key === "Escape") {
+            cancelledRef.current = true;
+            onCancel();
+          }
+        }}
+        onBlur={() => {
+          if (cancelledRef.current || submittingRef.current) return;
+          void submit();
+        }}
+      />
+    </div>
   );
 }
 
@@ -687,6 +923,10 @@ function WorkspaceMarkdownImage({ source, alt, workspaceRoot, documentPath }: {
   return resolvedSource
     ? <img src={resolvedSource} alt={alt} />
     : <span className="markdown-image-loading">图片加载中…</span>;
+}
+
+function pathFileName(path: string) {
+  return path.replace(/\\/g, "/").split("/").pop() ?? path;
 }
 
 function isPathInsideDirectory(path: string, directoryPath: string) {

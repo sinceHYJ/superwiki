@@ -104,9 +104,19 @@ fn workspace_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn validate_directory_name(name: &str) -> Result<(), String> {
+fn workspace_parent_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
+
+    if !root.is_dir() || !path.starts_with(&root) || !path.is_dir() {
+        return Err("目标文件夹不在已打开的目录中".into());
+    }
+    Ok(path)
+}
+
+fn validate_entry_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
-        return Err("文件夹名称无效".into());
+        return Err("名称无效".into());
     }
     Ok(())
 }
@@ -134,7 +144,7 @@ fn rename_workspace_directory(
     path: String,
     new_name: String,
 ) -> Result<String, String> {
-    validate_directory_name(&new_name)?;
+    validate_entry_name(&new_name)?;
     let path = workspace_directory_path(&root, &path)?;
     if path
         .file_name()
@@ -152,6 +162,56 @@ fn rename_workspace_directory(
     }
 
     fs::rename(&path, &destination).map_err(|error| format!("无法重命名文件夹：{error}"))?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn create_workspace_directory(
+    root: String,
+    parent_path: String,
+    name: String,
+) -> Result<String, String> {
+    validate_entry_name(&name)?;
+    let parent = workspace_parent_directory_path(&root, &parent_path)?;
+    let destination = parent.join(name);
+    fs::create_dir(&destination).map_err(|error| {
+        if error.kind() == ErrorKind::AlreadyExists {
+            "同名文件或文件夹已存在".to_string()
+        } else {
+            format!("无法创建文件夹：{error}")
+        }
+    })?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn create_workspace_markdown_file(
+    root: String,
+    parent_path: String,
+    name: String,
+) -> Result<String, String> {
+    validate_entry_name(&name)?;
+    let file_name = if Path::new(&name).extension().is_none() {
+        format!("{name}.md")
+    } else if is_markdown(Path::new(&name)) {
+        name
+    } else {
+        return Err("只能新建 Markdown 文件".into());
+    };
+
+    let parent = workspace_parent_directory_path(&root, &parent_path)?;
+    let destination = parent.join(file_name);
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+        .map_err(|error| {
+            if error.kind() == ErrorKind::AlreadyExists {
+                "同名文件或文件夹已存在".to_string()
+            } else {
+                format!("无法创建 Markdown 文件：{error}")
+            }
+        })?;
     Ok(destination.to_string_lossy().into_owned())
 }
 
@@ -323,6 +383,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_workspace,
             rename_workspace_directory,
+            create_workspace_directory,
+            create_workspace_markdown_file,
             read_workspace_file,
             save_workspace_file,
             read_workspace_image,
@@ -403,6 +465,76 @@ mod tests {
         );
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn creates_workspace_markdown_files_and_directories() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-create-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+
+        let directory = create_workspace_directory(
+            root.to_string_lossy().into_owned(),
+            root.to_string_lossy().into_owned(),
+            "notes".into(),
+        )
+        .unwrap();
+        let file = create_workspace_markdown_file(
+            root.to_string_lossy().into_owned(),
+            directory.clone(),
+            "first-note".into(),
+        )
+        .unwrap();
+
+        assert!(PathBuf::from(directory).is_dir());
+        assert_eq!(PathBuf::from(&file).file_name().unwrap(), "first-note.md");
+        assert_eq!(fs::read_to_string(file).unwrap(), "");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refuses_invalid_workspace_entries() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-create-errors-{unique}"));
+        let outside = std::env::temp_dir().join(format!("superwiki-create-outside-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join("existing.md"), "existing").unwrap();
+
+        let root_string = root.to_string_lossy().into_owned();
+        assert!(create_workspace_directory(
+            root_string.clone(),
+            root_string.clone(),
+            "../outside".into(),
+        )
+        .is_err());
+        assert!(create_workspace_markdown_file(
+            root_string.clone(),
+            root_string.clone(),
+            "note.txt".into(),
+        )
+        .is_err());
+        assert!(create_workspace_markdown_file(
+            root_string.clone(),
+            root_string.clone(),
+            "existing.md".into(),
+        )
+        .is_err());
+        assert!(create_workspace_directory(
+            root_string,
+            outside.to_string_lossy().into_owned(),
+            "invalid".into(),
+        )
+        .is_err());
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 
     #[test]
