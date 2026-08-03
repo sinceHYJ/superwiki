@@ -8,8 +8,9 @@
 - 未打开文件夹时显示明确的打开目录引导
 - 点击本地 `.md` / `.markdown` 文件直接编辑并保存
 - 点击 PNG、JPEG、GIF、WebP、SVG、BMP、ICO 图片进行只读预览
-- CodeMirror Markdown 编辑
-- 编辑、分栏、预览三种视图
+- Milkdown Crepe Markdown 所见即所得编辑
+- 代码块支持 JavaScript、TypeScript、Rust、Python、Java、Go、YAML、TOML 等常用语言语法高亮
+- 编辑、分栏、预览三种视图，保留独立 Markdown 预览
 - 500ms 防抖自动保存，切换文件前立即保存
 - 自动恢复上次打开的文件夹
 - 标题栏只读展示当前文件相对于工作区的路径

@@ -7,7 +7,7 @@ SuperWiki 是一个纯本地桌面 Markdown 文件夹编辑器，采用：
 - **桌面容器与本地能力**：Tauri 2
 - **本地文件服务层**：Rust
 - **界面层**：React 19 + TypeScript + Vite
-- **Markdown 编辑器**：CodeMirror 6
+- **Markdown 编辑器**：Milkdown Crepe 7（所见即所得）
 - **Markdown 渲染**：react-markdown + remark-gfm
 
 项目没有独立 HTTP 服务、数据库、账号系统或云端同步。所有文件读取和写入均发生在用户主动选择的本地文件夹内。
@@ -24,7 +24,7 @@ SuperWiki 是一个纯本地桌面 Markdown 文件夹编辑器，采用：
 React / TypeScript 前端（src/）
   ├─ 文件夹树展示
   ├─ 当前文件和视图状态
-  ├─ CodeMirror Markdown 编辑
+  ├─ Milkdown Crepe 所见即所得编辑
   ├─ react-markdown 实时预览
   ├─ 本地图片只读预览
   └─ 500ms 防抖自动保存
@@ -50,6 +50,8 @@ superwiki/
 ├── src/
 │   ├── App.tsx             # 主界面、目录树、编辑器、预览和自动保存
 │   ├── App.css             # 应用布局、目录树和 Markdown 样式
+│   ├── WysiwygEditor.tsx   # Milkdown Crepe 生命周期和 Markdown 同步
+│   ├── editorLanguages.ts  # CodeMirror 受控语言列表和按需加载
 │   ├── main.tsx            # React 入口
 │   └── vite-env.d.ts
 ├── src-tauri/
@@ -67,7 +69,7 @@ superwiki/
 
 ## 4. 前端职责
 
-主要文件：`src/App.tsx`
+主要文件：`src/App.tsx`、`src/WysiwygEditor.tsx`
 
 ### 4.1 工作区状态
 
@@ -92,18 +94,31 @@ open({ directory: true, multiple: false })
 ### 4.3 目录树
 
 - 文件夹使用原生 `<details>/<summary>` 展开和收起。
+- 收起目录时不得渲染其子节点；通过 `expanded` 状态只渲染已展开目录，避免大目录生成大量隐藏 DOM。
+- `MemoizedTreeNode` 和稳定的 `openTreeFile` 回调用于阻止编辑输入时重渲染整个目录树，不要改回内联 `onOpen` 函数。
 - 连续点击中 `event.detail > 1` 时阻止第二次默认切换，避免双击后立即恢复原状态。
 - 所有文件均可显示；`.md` 和 `.markdown` 可以编辑，常见图片格式只能预览。
 - 不要重新改成通过普通按钮反转 React 布尔状态的实现。
 
 ### 4.4 文件保存
 
-- 内容修改后 500ms 自动保存。
+- Milkdown 更新事件同步 Markdown 到 `content`，内容修改后 500ms 自动保存。
+- 切换文件、切换文件夹、关闭工作区或进入纯预览前，必须通过 `syncEditorContent` 从编辑器同步最新 Markdown。
 - 切换文件、切换文件夹或关闭工作区前必须调用 `flushPendingSave`。
 - `loadedContent` 表示最近一次成功读取或保存的内容，用于避免无变化写入。
 - 保存失败时必须保留当前编辑内容并显示错误，不能静默丢弃。
 
 ### 4.5 编辑与预览布局
+
+- 编辑区使用 Milkdown Crepe 所见即所得模式，标题、列表、粗体、引用和表格直接按格式显示。
+- 文件落盘内容仍然是 Markdown，不得改成 HTML 或编辑器私有 JSON。
+- `WysiwygEditor` 通过 `onReady` 暴露同步读取 Markdown 的函数，防止快速切换时丢失尚未触发 listener 的输入。
+- Crepe 仅启用当前需要的格式、列表、链接、表格、工具栏和代码块功能；不要无需求启用 AI、图片上传或 LaTeX。
+- 代码块语言统一维护在 `editorLanguages.ts`，只能按需加载明确支持的语言，禁止恢复全量 `@codemirror/language-data`。
+- 当前代码高亮语言：JavaScript、TypeScript、JSX、TSX、Rust、Python、Java、Go、HTML、CSS、JSON、YAML、TOML、Markdown、SQL、Shell。
+- `react-markdown` 独立预览必须保留。
+- 预览内容使用 `useDeferredValue`，Markdown 渲染组件使用 `memo`；避免输入时同步重算长文档预览。
+- `WysiwygEditor` 通过 `React.lazy` 按需加载，并按 `documentId` memo；目录浏览和图片预览不能提前加载整套编辑器依赖。
 
 右侧工作区的滚动边界依赖以下约束：
 
@@ -276,10 +291,16 @@ cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 1. 未打开文件夹时的引导页。
 2. 目录展开和收起。
 3. Markdown 文件切换到其他 Markdown 或图片前保存。
-4. 编辑、分栏、预览三种模式。
-5. 长文档预览可以独立滚动。
-6. 图片文件只能预览，不显示编辑器和保存状态。
-7. Markdown 和图片标题栏均正确显示只读相对路径。
+4. 所见即所得编辑区直接显示标题、粗体、列表等格式。
+5. 编辑、分栏、预览三种模式。
+6. 长文档预览可以独立滚动。
+7. 图片文件只能预览，不显示编辑器和保存状态。
+8. Markdown 和图片标题栏均正确显示只读相对路径。
+9. 输入后立即切换文件或纯预览不会丢失最后的内容。
+10. 大目录初始只渲染顶层节点，展开单个目录时只增加该目录的直接子节点。
+11. 大目录打开时连续输入不会触发整棵目录树重渲染。
+12. Rust、YAML、TOML、Java、Go 等代码块能显示语言名称和不同颜色的语法 token。
+13. 未使用的语言解析器保持按需加载，不得全部合并进主包。
 
 ## 9. Git 约定
 

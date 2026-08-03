@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import CodeMirror from "@uiw/react-codemirror";
-import { markdown } from "@codemirror/lang-markdown";
+import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -46,11 +44,13 @@ type ViewMode = "editor" | "split" | "preview";
 type SaveState = "saved" | "saving" | "error";
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
+const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
   const [content, setContent] = useState("");
+  const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -61,12 +61,22 @@ function App() {
   const activeFileRef = useRef<ActiveFile | null>(null);
   const contentRef = useRef("");
   const imageUrlRef = useRef<string | null>(null);
+  const editorMarkdownRef = useRef<(() => string) | null>(null);
   const saveTimerRef = useRef<number | null>(null);
 
   const replaceImageUrl = useCallback((url: string | null) => {
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
     imageUrlRef.current = url;
     setImageUrl(url);
+  }, []);
+
+  const syncEditorContent = useCallback(() => {
+    const latestMarkdown = editorMarkdownRef.current?.();
+    if (latestMarkdown === undefined) return contentRef.current;
+
+    contentRef.current = latestMarkdown;
+    setContent(latestMarkdown);
+    return latestMarkdown;
   }, []);
 
   const flushPendingSave = useCallback(async () => {
@@ -76,15 +86,18 @@ function App() {
     }
 
     const file = activeFileRef.current;
-    if (!file || file.kind !== "markdown" || contentRef.current === loadedContent.current) return;
+    if (!file || file.kind !== "markdown") return;
+
+    const latestContent = syncEditorContent();
+    if (latestContent === loadedContent.current) return;
 
     await invoke("save_workspace_file", {
       root: file.root,
       path: file.path,
-      content: contentRef.current,
+      content: latestContent,
     });
-    loadedContent.current = contentRef.current;
-  }, []);
+    loadedContent.current = latestContent;
+  }, [syncEditorContent]);
 
   const openFile = useCallback(async (file: ActiveFile) => {
     try {
@@ -109,6 +122,7 @@ function App() {
         loadedContent.current = fileContent;
         contentRef.current = fileContent;
         setContent(fileContent);
+        setEditorVersion((version) => version + 1);
         setSaveState("saved");
       }
 
@@ -205,6 +219,32 @@ function App() {
     }
   };
 
+  const handleEditorChange = useCallback((value: string) => {
+    contentRef.current = value;
+    setContent(value);
+  }, []);
+
+  const handleEditorReady = useCallback((getMarkdown: (() => string) | null) => {
+    editorMarkdownRef.current = getMarkdown;
+  }, []);
+
+  const openTreeFile = useCallback((file: FileTreeNode) => {
+    if (!workspace) return;
+    void openFile({
+      root: workspace.root,
+      path: file.path,
+      name: file.name,
+      kind: file.isImage ? "image" : "markdown",
+    });
+  }, [openFile, workspace]);
+
+  const previewContent = useDeferredValue(content);
+
+  const changeViewMode = (mode: ViewMode) => {
+    if (mode === "preview") syncEditorContent();
+    setViewMode(mode);
+  };
+
   const activeRelativePath = activeFile
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
@@ -243,17 +283,12 @@ function App() {
             <div className="file-tree" role="tree" aria-label={`${workspace.name} 文件目录`}>
               <div className="workspace-root"><FolderOpen size={15} /><strong>{workspace.name}</strong></div>
               {workspace.children.map((node) => (
-                <TreeNode
+                <MemoizedTreeNode
                   key={node.path}
                   node={node}
                   depth={0}
                   activePath={activeFile?.path ?? null}
-                  onOpen={(file) => void openFile({
-                    root: workspace.root,
-                    path: file.path,
-                    name: file.name,
-                    kind: file.isImage ? "image" : "markdown",
-                  })}
+                  onOpen={openTreeFile}
                 />
               ))}
               {workspace.children.length === 0 && <div className="empty-directory">文件夹为空</div>}
@@ -286,9 +321,9 @@ function App() {
           {activeFile?.kind === "markdown" && (
             <div className="toolbar-actions">
               <div className="view-switcher" aria-label="视图模式">
-                <button className={viewMode === "editor" ? "active" : ""} onClick={() => setViewMode("editor")}>编辑</button>
-                <button className={viewMode === "split" ? "active" : ""} onClick={() => setViewMode("split")} title="分栏"><Columns2 size={15} /></button>
-                <button className={viewMode === "preview" ? "active" : ""} onClick={() => setViewMode("preview")}>预览</button>
+                <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
+                <button className={viewMode === "split" ? "active" : ""} onClick={() => changeViewMode("split")} title="分栏"><Columns2 size={15} /></button>
+                <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
               </div>
             </div>
           )}
@@ -321,15 +356,17 @@ function App() {
         {activeFile?.kind === "markdown" && (
           <div className={`editor-layout mode-${viewMode}`}>
             {viewMode !== "preview" && (
-              <section className="editor-pane" aria-label="Markdown 编辑器">
-                <div className="pane-label">MARKDOWN</div>
-                <CodeMirror
-                  value={content}
-                  height="100%"
-                  extensions={[markdown()]}
-                  onChange={(value) => { contentRef.current = value; setContent(value); }}
-                  basicSetup={{ lineNumbers: false, foldGutter: false, highlightActiveLineGutter: false }}
-                />
+              <section className="editor-pane" aria-label="Markdown 所见即所得编辑器">
+                <div className="pane-label">所见即所得</div>
+                <Suspense fallback={<div className="editor-loading">正在加载所见即所得编辑器…</div>}>
+                  <WysiwygEditor
+                    key={`${activeFile.path}:${editorVersion}`}
+                    documentId={`${activeFile.path}:${editorVersion}`}
+                    initialValue={content}
+                    onChange={handleEditorChange}
+                    onReady={handleEditorReady}
+                  />
+                </Suspense>
               </section>
             )}
 
@@ -337,7 +374,7 @@ function App() {
               <section className="preview-pane" aria-label="Markdown 预览">
                 <div className="pane-label">预览</div>
                 <article className="markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  <MarkdownPreview content={previewContent} />
                 </article>
               </section>
             )}
@@ -383,11 +420,12 @@ type TreeNodeProps = {
 };
 
 function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
+  const [expanded, setExpanded] = useState(false);
   const style = { paddingLeft: 10 + depth * 15 };
 
   if (node.isDir) {
     return (
-      <details className="tree-directory">
+      <details className="tree-directory" onToggle={(event) => setExpanded(event.currentTarget.open)}>
         <summary
           className="tree-row directory"
           style={style}
@@ -400,8 +438,8 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
           <FolderOpen className="folder-open" size={15} />
           <span>{node.name}</span>
         </summary>
-        {node.children.map((child) => (
-          <TreeNode key={child.path} node={child} depth={depth + 1} activePath={activePath} onOpen={onOpen} />
+        {expanded && node.children.map((child) => (
+          <MemoizedTreeNode key={child.path} node={child} depth={depth + 1} activePath={activePath} onOpen={onOpen} />
         ))}
       </details>
     );
@@ -422,6 +460,12 @@ function TreeNode({ node, depth, activePath, onOpen }: TreeNodeProps) {
     </button>
   );
 }
+
+const MemoizedTreeNode = memo(TreeNode);
+
+const MarkdownPreview = memo(function MarkdownPreview({ content }: { content: string }) {
+  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
+});
 
 function workspaceRelativePath(root: string, path: string, fallbackName: string) {
   const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");

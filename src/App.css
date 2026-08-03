@@ -121,17 +121,16 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .editor-layout { display: grid; flex: 1; min-height: 0; overflow: hidden; }
 .editor-layout.mode-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .editor-layout.mode-editor, .editor-layout.mode-preview { grid-template-columns: 1fr; }
-.editor-pane, .preview-pane { position: relative; min-width: 0; min-height: 0; overflow: auto; background: #fff; }
-.editor-pane { border-right: 1px solid #e8e8e1; }
+.editor-pane, .preview-pane { position: relative; min-width: 0; min-height: 0; background: #fff; }
+.editor-pane { overflow: hidden; border-right: 1px solid #e8e8e1; }
+.preview-pane { overflow: auto; }
 .pane-label { position: sticky; z-index: 2; top: 0; height: 34px; padding: 10px 20px 0; color: #aaaDa3; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; background: linear-gradient(#fff 75%, rgba(255,255,255,0)); pointer-events: none; }
 
-.editor-pane .cm-theme, .editor-pane .cm-editor { height: calc(100% - 34px); }
-.editor-pane .cm-editor { color: #37382f; font-size: 15px; background: #fff; }
-.editor-pane .cm-scroller { padding: 12px 20px 60px; font-family: "SFMono-Regular", Consolas, monospace; line-height: 1.8; }
-.editor-pane .cm-content { max-width: 780px; margin: 0 auto; caret-color: #697d18; }
-.editor-pane .cm-focused { outline: none; }
-.editor-pane .cm-activeLine { background: #fafaf5; }
-.editor-pane .cm-selectionBackground { background: #e6efbf !important; }
+.wysiwyg-editor { height: calc(100% - 34px); overflow: auto; background: #fff; }
+.wysiwyg-editor .milkdown { min-height: 100%; color: #37382f; background: #fff; --crepe-color-background: #fff; --crepe-color-surface: #f7f7f2; --crepe-color-surface-low: #eeeee8; --crepe-color-on-background: #2e3028; --crepe-color-on-surface: #2e3028; --crepe-color-on-surface-variant: #64675d; --crepe-color-outline: #c8cac0; --crepe-color-primary: #667a1e; --crepe-color-secondary: #e4edb9; --crepe-color-on-secondary: #303716; --crepe-color-hover: #f2f5e4; --crepe-color-selected: #e8efc9; }
+.wysiwyg-editor .milkdown .ProseMirror { box-sizing: border-box; width: min(100%, 780px); min-height: 100%; margin: 0 auto; padding: 34px 42px 80px; color: #34352e; font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; font-size: 16px; line-height: 1.78; outline: none; }
+.wysiwyg-editor .milkdown .milkdown-toolbar { position: sticky; z-index: 4; top: 0; }
+.wysiwyg-editor .milkdown h1, .wysiwyg-editor .milkdown h2, .wysiwyg-editor .milkdown h3 { color: #23241f; letter-spacing: -.025em; }
 
 .markdown-body { max-width: 760px; margin: 0 auto; padding: 14px 42px 80px; color: #34352e; font-size: 16px; line-height: 1.78; }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #23241f; line-height: 1.3; letter-spacing: -.025em; }
@@ -160,3 +159,4 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .image-preview { flex: 1; min-height: 0; overflow: auto; padding: 36px; background: #f2f2ed; }
 .image-preview-canvas { display: grid; min-width: min-content; min-height: 100%; place-items: center; }
 .image-preview img { display: block; max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 12px 36px rgba(31, 32, 27, .16); }
+.editor-loading { display: grid; height: calc(100% - 34px); place-items: center; color: #8a8c83; font-size: 12px; background: #fff; }
