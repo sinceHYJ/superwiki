@@ -604,7 +604,6 @@ function App() {
           <div className={`editor-layout mode-${viewMode}`}>
             {viewMode !== "preview" && (
               <section className="editor-pane" aria-label="Markdown 所见即所得编辑器">
-                <div className="pane-label">所见即所得</div>
                 <Suspense fallback={<div className="editor-loading">正在加载所见即所得编辑器…</div>}>
                   <WysiwygEditor
                     key={`${activeFile.path}:${editorVersion}`}
