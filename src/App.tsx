@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import MermaidDiagram from "./MermaidDiagram";
+import { isMermaidLanguage } from "./mermaidRenderer";
 import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
 import "./App.css";
 
@@ -883,6 +885,14 @@ const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, 
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
+        code: ({ className, children, ...props }) => {
+          const language = /(?:^|\s)language-([^\s]+)/.exec(className ?? "")?.[1];
+          if (isMermaidLanguage(language)) {
+            return <MermaidDiagram source={String(children).replace(/\n$/, "")} />;
+          }
+
+          return <code className={className} {...props}>{children}</code>;
+        },
         img: ({ src, alt }) => (
           <WorkspaceMarkdownImage
             source={src}

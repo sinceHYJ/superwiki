@@ -2,6 +2,11 @@ import { LanguageDescription, LanguageSupport, StreamLanguage } from "@codemirro
 
 export const supportedCodeLanguages = [
   LanguageDescription.of({
+    name: "Mermaid",
+    alias: ["mermaid"],
+    load: async () => (await import("@codemirror/lang-markdown")).markdown(),
+  }),
+  LanguageDescription.of({
     name: "JavaScript",
     alias: ["js", "javascript", "node"],
     extensions: ["js", "mjs", "cjs"],

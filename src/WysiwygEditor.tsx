@@ -11,6 +11,7 @@ import { toolbar } from "@milkdown/crepe/feature/toolbar";
 import { topBar } from "@milkdown/crepe/feature/top-bar";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
+import { isMermaidLanguage, mermaidErrorMessage, renderMermaid } from "./mermaidRenderer";
 import { proxyWorkspaceImage, uploadWorkspaceImage } from "./workspaceImages";
 import "@milkdown/crepe/theme/common/reset.css";
 import "@milkdown/crepe/theme/common/prosemirror.css";
@@ -73,6 +74,20 @@ function WysiwygEditorInner({
         noResultText: "未找到语言",
         copyText: "复制",
         previewToggleText: (previewOnly) => previewOnly ? "编辑" : "隐藏预览",
+        previewLabel: "图表预览",
+        previewLoading: "正在渲染 Mermaid 图表…",
+        renderPreview: (language, markdown, applyPreview) => {
+          if (!isMermaidLanguage(language)) return null;
+
+          void renderMermaid(markdown)
+            .then(applyPreview)
+            .catch((error: unknown) => {
+              const message = document.createElement("div");
+              message.className = "mermaid-error";
+              message.textContent = `Mermaid 图表渲染失败：${mermaidErrorMessage(error)}`;
+              applyPreview(message);
+            });
+        },
       })
       .addFeature(cursor)
       .addFeature(imageBlock, {
