@@ -114,8 +114,10 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .toolbar-actions { display: flex; align-items: center; gap: 10px; }
 .icon-button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; color: #6d7066; background: transparent; border: 1px solid #dedfd7; border-radius: 8px; cursor: pointer; }
 .icon-button:hover { color: #24251f; background: #f0f0ea; }
+.sidebar-toggle, .outline-toggle { transition: color 120ms ease, background 120ms ease, transform 180ms ease; }
 .sidebar-toggle { transform: rotate(0); }
 .sidebar-collapsed .sidebar-toggle { transform: rotate(180deg); }
+.outline-toggle.collapsed { transform: rotate(180deg); }
 
 .view-switcher { display: flex; padding: 3px; background: #eeeee8; border-radius: 9px; }
 .view-switcher button { display: grid; place-items: center; min-width: 40px; height: 28px; padding: 0 10px; color: #777970; font-size: 12px; background: transparent; border: 0; border-radius: 6px; cursor: pointer; }
@@ -134,6 +136,8 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .editor-layout { display: grid; flex: 1; min-height: 0; overflow: hidden; }
 .editor-layout.mode-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 220px; }
 .editor-layout.mode-editor, .editor-layout.mode-preview { grid-template-columns: minmax(0, 1fr) 220px; }
+.editor-layout.mode-split.outline-hidden { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.editor-layout.mode-editor.outline-hidden, .editor-layout.mode-preview.outline-hidden { grid-template-columns: minmax(0, 1fr); }
 .editor-pane, .preview-pane { position: relative; min-width: 0; min-height: 0; background: #fff; }
 .editor-pane { overflow: hidden; border-right: 1px solid #e8e8e1; }
 .preview-pane { overflow: auto; }
@@ -190,6 +194,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 @media (max-width: 920px) {
   .app-shell { --sidebar-width: 224px; }
   .editor-layout.mode-split, .editor-layout.mode-editor, .editor-layout.mode-preview { grid-template-columns: minmax(0, 1fr) 190px; }
+  .editor-layout.mode-split.outline-hidden, .editor-layout.mode-editor.outline-hidden, .editor-layout.mode-preview.outline-hidden { grid-template-columns: minmax(0, 1fr); }
   .mode-split .preview-pane { display: none; }
 }
 

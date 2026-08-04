@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   FolderOpen,
   PanelLeftClose,
+  PanelRightClose,
   Pencil,
   Plus,
   RefreshCw,
@@ -85,6 +86,7 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [outlineOpen, setOutlineOpen] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
   const [createEntryMenu, setCreateEntryMenu] = useState<CreateEntryMenu | null>(null);
@@ -601,6 +603,15 @@ function App() {
                 <button className={viewMode === "split" ? "active" : ""} onClick={() => changeViewMode("split")} title="分栏"><Columns2 size={15} /></button>
                 <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
               </div>
+              <button
+                className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
+                onClick={() => setOutlineOpen((value) => !value)}
+                title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+                aria-label={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+                aria-pressed={!outlineOpen}
+              >
+                <PanelRightClose size={18} />
+              </button>
             </div>
           )}
         </header>
@@ -630,7 +641,7 @@ function App() {
         )}
 
         {activeFile?.kind === "markdown" && (
-          <div className={`editor-layout mode-${viewMode}`}>
+          <div className={`editor-layout mode-${viewMode} ${outlineOpen ? "" : "outline-hidden"}`}>
             {viewMode !== "preview" && (
               <section ref={editorPaneRef} className="editor-pane" aria-label="Markdown 所见即所得编辑器">
                 <Suspense fallback={<div className="editor-loading">正在加载所见即所得编辑器…</div>}>
@@ -661,7 +672,7 @@ function App() {
               </section>
             )}
 
-            <DocumentOutline headings={documentHeadings} onSelect={scrollToHeading} />
+            {outlineOpen && <DocumentOutline headings={documentHeadings} onSelect={scrollToHeading} />}
           </div>
         )}
 
