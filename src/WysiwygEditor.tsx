@@ -39,6 +39,18 @@ type WysiwygEditorProps = {
   onAssetUploaded: () => void;
 };
 
+function scrollTopBarWithMouseWheel(event: WheelEvent) {
+  const element = event.currentTarget as HTMLElement;
+  if (element.scrollWidth <= element.clientWidth || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  element.scrollLeft = Math.max(
+    0,
+    Math.min(element.scrollLeft + event.deltaY, element.scrollWidth - element.clientWidth),
+  );
+}
+
 function WysiwygEditorInner({
   workspaceRoot,
   documentPath,
@@ -130,11 +142,20 @@ function WysiwygEditorInner({
       .addFeature(toolbar)
       .addFeature(topBar);
 
+    let topBarElement: HTMLElement | null = null;
+
     crepe.on((listener) => {
       listener
-        .mounted(() => onReadyRef.current(() => crepe.getMarkdown()))
+        .mounted(() => {
+          onReadyRef.current(() => crepe.getMarkdown());
+          topBarElement = root.querySelector<HTMLElement>(".milkdown-top-bar");
+          topBarElement?.addEventListener("wheel", scrollTopBarWithMouseWheel, { passive: false });
+        })
         .markdownUpdated((_ctx, markdown) => onChangeRef.current(markdown))
-        .destroy(() => onReadyRef.current(null));
+        .destroy(() => {
+          topBarElement?.removeEventListener("wheel", scrollTopBarWithMouseWheel);
+          onReadyRef.current(null);
+        });
     });
 
     return crepe;
