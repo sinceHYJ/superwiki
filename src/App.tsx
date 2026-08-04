@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -76,6 +77,10 @@ type CreatingEntry = {
 };
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
+const DEFAULT_SIDEBAR_WIDTH = 286;
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 480;
+const MIN_WORKSPACE_WIDTH = 360;
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 const OfficePreview = lazy(() => import("./OfficePreview"));
 
@@ -89,6 +94,8 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [sidebarResizing, setSidebarResizing] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
@@ -104,6 +111,7 @@ function App() {
   const editorPaneRef = useRef<HTMLElement>(null);
   const previewPaneRef = useRef<HTMLElement>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const sidebarResizingRef = useRef(false);
 
   const replaceImageUrl = useCallback((url: string | null) => {
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
@@ -469,12 +477,51 @@ function App() {
     setViewMode(mode);
   };
 
+  const clampSidebarWidth = useCallback((width: number) => {
+    const availableWidth = Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
+    return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), Math.max(MIN_SIDEBAR_WIDTH, availableWidth));
+  }, []);
+
+  const stopSidebarResize = useCallback(() => {
+    sidebarResizingRef.current = false;
+    setSidebarResizing(false);
+  }, []);
+
+  const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sidebarResizingRef.current = true;
+    setSidebarResizing(true);
+  };
+
+  const handleSidebarResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!sidebarResizingRef.current) return;
+    setSidebarWidth(clampSidebarWidth(event.clientX));
+  };
+
+  const handleSidebarResizeEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    stopSidebarResize();
+  };
+
+  const handleSidebarResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowLeft" ? -10 : 10;
+    setSidebarWidth((width) => clampSidebarWidth(width + direction));
+  };
+
   const activeRelativePath = activeFile
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
 
   return (
-    <main className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
+    <main
+      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""}`}
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark"><img src="/superwiki-logo.png" alt="" /></span>
@@ -592,6 +639,25 @@ function App() {
 
         <div className="sidebar-footer">Markdown · 图片预览</div>
       </aside>
+
+      {sidebarOpen && (
+        <div
+          className="sidebar-resizer"
+          role="separator"
+          aria-label="调整目录栏宽度"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          onPointerDown={handleSidebarResizeStart}
+          onPointerMove={handleSidebarResizeMove}
+          onPointerUp={handleSidebarResizeEnd}
+          onPointerCancel={handleSidebarResizeEnd}
+          onLostPointerCapture={stopSidebarResize}
+          onKeyDown={handleSidebarResizeKeyDown}
+        />
+      )}
 
       <section className="workspace">
         <header className="toolbar">

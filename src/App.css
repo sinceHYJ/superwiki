@@ -17,12 +17,40 @@ button { font: inherit; }
   grid-template-columns: var(--sidebar-width) 1fr;
   width: 100vw;
   height: 100vh;
+  position: relative;
   background: #fbfbf8;
   transition: grid-template-columns 180ms ease;
 }
 
+.app-shell.sidebar-resizing { cursor: col-resize; transition: none; user-select: none; }
 .app-shell.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .sidebar-collapsed .sidebar { transform: translateX(-100%); }
+
+.sidebar-resizer {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-width);
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  transform: translateX(-50%);
+}
+.sidebar-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  content: "";
+  background: transparent;
+  transition: background 120ms ease;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.sidebar-resizing .sidebar-resizer::after { background: #b8cb5d; }
+.sidebar-resizer:focus-visible { outline: none; }
 
 .sidebar {
   position: relative;
