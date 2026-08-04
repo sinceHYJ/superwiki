@@ -220,6 +220,18 @@ fn rename_workspace_file(root: String, path: String, new_name: String) -> Result
 }
 
 #[tauri::command]
+fn delete_workspace_directory(root: String, path: String) -> Result<(), String> {
+    let path = workspace_directory_path(&root, &path)?;
+    fs::remove_dir_all(path).map_err(|error| format!("无法删除文件夹：{error}"))
+}
+
+#[tauri::command]
+fn delete_workspace_file(root: String, path: String) -> Result<(), String> {
+    let path = workspace_file_path(&root, &path)?;
+    fs::remove_file(path).map_err(|error| format!("无法删除文件：{error}"))
+}
+
+#[tauri::command]
 fn create_workspace_directory(
     root: String,
     parent_path: String,
@@ -558,6 +570,8 @@ pub fn run() {
             list_workspace,
             rename_workspace_directory,
             rename_workspace_file,
+            delete_workspace_directory,
+            delete_workspace_file,
             create_workspace_directory,
             create_workspace_markdown_file,
             read_workspace_file,
@@ -787,6 +801,61 @@ mod tests {
             "invalid".into(),
         )
         .is_err());
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn deletes_workspace_files_and_directories() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-delete-{unique}"));
+        let directory = root.join("notes");
+        let nested_file = directory.join("nested.md");
+        let file = root.join("note.txt");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&nested_file, "nested").unwrap();
+        fs::write(&file, "note").unwrap();
+
+        let root_string = root.to_string_lossy().into_owned();
+        delete_workspace_file(root_string.clone(), file.to_string_lossy().into_owned()).unwrap();
+        delete_workspace_directory(root_string, directory.to_string_lossy().into_owned()).unwrap();
+
+        assert!(!file.exists());
+        assert!(!directory.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refuses_to_delete_workspace_root_or_outside_entries() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-delete-root-{unique}"));
+        let outside = std::env::temp_dir().join(format!("superwiki-delete-outside-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let outside_file = outside.join("outside.md");
+        fs::write(&outside_file, "outside").unwrap();
+
+        let root_string = root.to_string_lossy().into_owned();
+        assert!(delete_workspace_directory(root_string.clone(), root_string.clone()).is_err());
+        assert!(delete_workspace_directory(
+            root_string.clone(),
+            outside.to_string_lossy().into_owned(),
+        )
+        .is_err());
+        assert!(
+            delete_workspace_file(root_string, outside_file.to_string_lossy().into_owned(),)
+                .is_err()
+        );
+        assert!(root.is_dir());
+        assert!(outside.is_dir());
+        assert!(outside_file.is_file());
 
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(outside).unwrap();

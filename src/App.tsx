@@ -15,6 +15,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -348,7 +349,7 @@ function App() {
     setDirectoryContextMenu({
       node,
       x: Math.min(event.clientX, window.innerWidth - 170),
-      y: Math.min(event.clientY, window.innerHeight - (node.isMarkdown ? 74 : 44)),
+      y: Math.min(event.clientY, window.innerHeight - (node.isMarkdown ? 104 : 74)),
     });
   }, []);
 
@@ -473,6 +474,54 @@ function App() {
       return false;
     }
   }, [flushPendingSave, workspace]);
+
+  const deleteTreeNode = useCallback(async (node: FileTreeNode) => {
+    if (!workspace) return;
+    const entryLabel = node.isDir ? "文件夹" : "文件";
+    const message = node.isDir
+      ? `确定永久删除文件夹“${node.name}”及其中的所有内容吗？此操作不可恢复。`
+      : `确定永久删除文件“${node.name}”吗？此操作不可恢复。`;
+    setDirectoryContextMenu(null);
+    if (!window.confirm(message)) return;
+
+    try {
+      setError("");
+      const currentFile = activeFileRef.current;
+      const deletesCurrentFile = currentFile
+        && (currentFile.path === node.path || (node.isDir && isPathInsideDirectory(currentFile.path, node.path)));
+      if (deletesCurrentFile) await flushPendingSave();
+
+      await invoke(node.isDir ? "delete_workspace_directory" : "delete_workspace_file", {
+        root: workspace.root,
+        path: node.path,
+      });
+
+      if (deletesCurrentFile) {
+        activeFileRef.current = null;
+        editorMarkdownRef.current = null;
+        loadedContent.current = "";
+        contentRef.current = "";
+        setActiveFile(null);
+        setContent("");
+        replaceImageUrl(null);
+        setOfficeData(null);
+        setSaveState("saved");
+      }
+
+      setCreatingEntry(null);
+      setRenamingPath(null);
+    } catch (reason) {
+      setError(`无法删除${entryLabel}：${String(reason)}`);
+      return;
+    }
+
+    try {
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
+      setWorkspace(tree);
+    } catch (reason) {
+      setError(`已删除${entryLabel}，但无法刷新目录：${String(reason)}`);
+    }
+  }, [flushPendingSave, replaceImageUrl, workspace]);
 
   const previewContent = useDeferredValue(content);
   const documentHeadings = useMemo(() => extractDocumentHeadings(previewContent), [previewContent]);
@@ -656,6 +705,9 @@ function App() {
               }}
             >
               <Pencil size={13} />重命名
+            </button>
+            <button className="danger" onClick={() => void deleteTreeNode(directoryContextMenu.node)}>
+              <Trash2 size={13} />删除
             </button>
           </div>
         )}
@@ -974,7 +1026,7 @@ function TreeNode({
       className={fileRowClassName}
       style={style}
       aria-disabled={!node.isMarkdown && !node.isImage && !node.isOffice}
-      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可重命名"}
+      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可重命名或删除"}
       onClick={() => {
         if (node.isMarkdown || node.isImage || node.isOffice) onOpen(node);
       }}

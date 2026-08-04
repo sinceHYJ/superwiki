@@ -121,6 +121,8 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .directory-context-menu { position: fixed; z-index: 20; width: 160px; padding: 4px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; box-shadow: 0 8px 24px rgba(20, 21, 18, .2); }
 .directory-context-menu button { display: flex; align-items: center; gap: 7px; width: 100%; height: 30px; padding: 0 9px; color: #34352e; font-size: 12px; text-align: left; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
 .directory-context-menu button:hover { background: #f0f2e7; }
+.directory-context-menu button.danger { color: #a13d36; }
+.directory-context-menu button.danger:hover { background: #fff0ee; }
 .create-entry-menu { width: 150px; }
 
 .sidebar-footer { padding: 12px 8px 0; color: #71746b; font-size: 11px; border-top: 1px solid #3a3c36; }
