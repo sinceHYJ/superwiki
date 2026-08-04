@@ -15,6 +15,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Settings,
   Trash2,
   X,
 } from "lucide-react";
@@ -52,6 +53,7 @@ type ActiveFile = {
 
 type ViewMode = "editor" | "split" | "preview";
 type SaveState = "saved" | "saving" | "error";
+type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
 
 type DocumentHeading = {
   level: number;
@@ -78,6 +80,18 @@ type CreatingEntry = {
 };
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
+const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
+const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
+  { id: "yellow", name: "明亮黄", color: "#d9ed72" },
+  { id: "sky", name: "天蓝色", color: "#7dd3fc" },
+  { id: "mint", name: "薄荷绿", color: "#86efac" },
+  { id: "coral", name: "珊瑚粉", color: "#fda4af" },
+  { id: "lavender", name: "薰衣草紫", color: "#c4b5fd" },
+];
+
+function isThemeColor(value: string | null): value is ThemeColor {
+  return THEME_COLORS.some((theme) => theme.id === value);
+}
 const DEFAULT_SIDEBAR_WIDTH = 286;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
@@ -100,6 +114,11 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [sidebarResizing, setSidebarResizing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
+    const storedTheme = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
+    return isThemeColor(storedTheme) ? storedTheme : "yellow";
+  });
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
@@ -259,6 +278,16 @@ function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [createEntryMenu, directoryContextMenu]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [settingsOpen]);
 
   useEffect(() => {
     const storedRoot = localStorage.getItem(WORKSPACE_STORAGE_KEY);
@@ -587,6 +616,7 @@ function App() {
   return (
     <main
       className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""}`}
+      data-theme={themeColor}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
       <aside className="sidebar">
@@ -712,7 +742,17 @@ function App() {
           </div>
         )}
 
-        <div className="sidebar-footer">Markdown · 图片预览</div>
+        <div className="sidebar-footer">
+          <span>Markdown · 图片预览</span>
+          <button
+            className="settings-button"
+            onClick={() => setSettingsOpen(true)}
+            title="设置"
+            aria-label="打开设置"
+          >
+            <Settings size={16} />
+          </button>
+        </div>
       </aside>
 
       {sidebarOpen && (
@@ -849,6 +889,55 @@ function App() {
           </Suspense>
         )}
       </section>
+
+      {settingsOpen && (
+        <div className="settings-backdrop" onMouseDown={() => setSettingsOpen(false)}>
+          <section
+            className="settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className="settings-header">
+              <h2 id="settings-title">设置</h2>
+              <button onClick={() => setSettingsOpen(false)} title="关闭设置" aria-label="关闭设置">
+                <X size={18} />
+              </button>
+            </header>
+            <div className="settings-layout">
+              <nav className="settings-nav" aria-label="设置分类">
+                <button className="active" aria-current="page">
+                  <Settings size={16} />外观
+                </button>
+              </nav>
+              <div className="settings-content">
+                <div className="settings-section-heading">
+                  <h3>外观</h3>
+                  <p>选择应用的主色调，修改后会立即生效。</p>
+                </div>
+                <div className="theme-color-grid" role="group" aria-label="主色调">
+                  {THEME_COLORS.map((theme) => (
+                    <button
+                      key={theme.id}
+                      className={`theme-color-option ${themeColor === theme.id ? "active" : ""}`}
+                      aria-pressed={themeColor === theme.id}
+                      onClick={() => {
+                        setThemeColor(theme.id);
+                        localStorage.setItem(THEME_COLOR_STORAGE_KEY, theme.id);
+                      }}
+                    >
+                      <span className="theme-color-swatch" style={{ backgroundColor: theme.color }} />
+                      <span>{theme.name}</span>
+                      {themeColor === theme.id && <span className="theme-selected-mark">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
