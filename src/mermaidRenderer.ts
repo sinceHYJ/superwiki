@@ -12,6 +12,7 @@ async function getMermaid() {
       mermaid.initialize({
         startOnLoad: false,
         securityLevel: "strict",
+        suppressErrorRendering: true,
         theme: "neutral",
       });
       return mermaid;
