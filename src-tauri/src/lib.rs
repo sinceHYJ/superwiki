@@ -4,6 +4,7 @@ use std::{
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
 };
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -523,6 +524,21 @@ fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Respon
 }
 
 #[tauri::command]
+fn reveal_workspace_markdown_file(
+    app: tauri::AppHandle,
+    root: String,
+    path: String,
+) -> Result<(), String> {
+    let path = workspace_file_path(&root, &path)?;
+    if !is_markdown(&path) {
+        return Err("只能在文件管理器中打开 Markdown 文件".into());
+    }
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|error| format!("无法打开文件所在目录：{error}"))
+}
+
+#[tauri::command]
 fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Response, String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_office(&path) {
@@ -537,6 +553,7 @@ fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Respo
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             list_workspace,
             rename_workspace_directory,
@@ -545,6 +562,7 @@ pub fn run() {
             create_workspace_markdown_file,
             read_workspace_file,
             save_workspace_file,
+            reveal_workspace_markdown_file,
             read_workspace_image,
             read_workspace_html,
             read_workspace_office,

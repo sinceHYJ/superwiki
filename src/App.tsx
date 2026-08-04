@@ -81,6 +81,9 @@ const DEFAULT_SIDEBAR_WIDTH = 286;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
 const MIN_WORKSPACE_WIDTH = 360;
+const OPEN_IN_FILE_MANAGER_LABEL = /Macintosh|Mac OS X/i.test(navigator.userAgent)
+  ? "在 Finder 中打开"
+  : "在文件管理器打开";
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 const OfficePreview = lazy(() => import("./OfficePreview"));
 
@@ -344,10 +347,25 @@ function App() {
     setCreatingEntry(null);
     setDirectoryContextMenu({
       node,
-      x: Math.min(event.clientX, window.innerWidth - 150),
-      y: Math.min(event.clientY, window.innerHeight - 44),
+      x: Math.min(event.clientX, window.innerWidth - 170),
+      y: Math.min(event.clientY, window.innerHeight - (node.isMarkdown ? 74 : 44)),
     });
   }, []);
+
+  const revealMarkdownFile = useCallback(async (node: FileTreeNode) => {
+    if (!workspace || !node.isMarkdown) return;
+
+    setDirectoryContextMenu(null);
+    try {
+      setError("");
+      await invoke("reveal_workspace_markdown_file", {
+        root: workspace.root,
+        path: node.path,
+      });
+    } catch (reason) {
+      setError(`无法在文件管理器中打开：${String(reason)}`);
+    }
+  }, [workspace]);
 
   const openCreateEntryMenu = useCallback((event: React.MouseEvent, parentPath: string) => {
     event.preventDefault();
@@ -626,6 +644,11 @@ function App() {
             style={{ left: directoryContextMenu.x, top: directoryContextMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
+            {directoryContextMenu.node.isMarkdown && (
+              <button onClick={() => void revealMarkdownFile(directoryContextMenu.node)}>
+                <FolderOpen size={13} />{OPEN_IN_FILE_MANAGER_LABEL}
+              </button>
+            )}
             <button
               onClick={() => {
                 setRenamingPath(directoryContextMenu.node.path);
