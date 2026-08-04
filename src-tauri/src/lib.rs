@@ -26,7 +26,7 @@ struct WorkspaceTree {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ImageUploadMetadata {
+struct AssetUploadMetadata {
     root: String,
     document_path: String,
     file_name: String,
@@ -48,6 +48,14 @@ fn is_image(path: &Path) -> bool {
                 extension.to_ascii_lowercase().as_str(),
                 "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico"
             )
+        })
+}
+
+fn is_html(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm")
         })
 }
 
@@ -320,7 +328,7 @@ fn sanitize_image_name(file_name: &str) -> Result<String, String> {
     ))
 }
 
-fn unique_image_path(assets_dir: &Path, file_name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+fn unique_asset_path(assets_dir: &Path, file_name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     let path = Path::new(file_name);
     let stem = path
         .file_stem()
@@ -357,7 +365,7 @@ fn unique_image_path(assets_dir: &Path, file_name: &str, bytes: &[u8]) -> Result
     unreachable!()
 }
 
-fn save_uploaded_image(metadata: ImageUploadMetadata, bytes: &[u8]) -> Result<String, String> {
+fn save_uploaded_image(metadata: AssetUploadMetadata, bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("图片内容为空".into());
     }
@@ -379,7 +387,7 @@ fn save_uploaded_image(metadata: ImageUploadMetadata, bytes: &[u8]) -> Result<St
     }
 
     let file_name = sanitize_image_name(&metadata.file_name)?;
-    let destination = unique_image_path(&assets_dir, &file_name, bytes)?;
+    let destination = unique_asset_path(&assets_dir, &file_name, bytes)?;
     let saved_name = destination
         .file_name()
         .and_then(|value| value.to_str())
@@ -387,7 +395,82 @@ fn save_uploaded_image(metadata: ImageUploadMetadata, bytes: &[u8]) -> Result<St
     Ok(format!("assets/{saved_name}"))
 }
 
-fn parse_upload_payload(body: &[u8]) -> Result<(ImageUploadMetadata, &[u8]), String> {
+fn sanitize_html_name(file_name: &str) -> Result<String, String> {
+    let base_name = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "HTML 文件名无效".to_string())?;
+    let path = Path::new(base_name);
+    if !is_html(path) {
+        return Err("仅支持 .html 或 .htm 文件".into());
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "HTML 扩展名无效".to_string())?
+        .to_ascii_lowercase();
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("page");
+    let sanitized_stem: String = stem
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let sanitized_stem = sanitized_stem.trim_matches('-');
+    Ok(format!(
+        "{}.{}",
+        if sanitized_stem.is_empty() {
+            "page"
+        } else {
+            sanitized_stem
+        },
+        extension
+    ))
+}
+
+fn save_uploaded_html(metadata: AssetUploadMetadata, bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("HTML 文件内容为空".into());
+    }
+    std::str::from_utf8(bytes)
+        .map_err(|error| format!("HTML 文件不是有效的 UTF-8 文本：{error}"))?;
+
+    let root = fs::canonicalize(&metadata.root).map_err(|error| error.to_string())?;
+    let document_path = workspace_file_path(&metadata.root, &metadata.document_path)?;
+    if !is_markdown(&document_path) {
+        return Err("HTML 文件只能上传到 Markdown 文档".into());
+    }
+
+    let document_dir = document_path
+        .parent()
+        .ok_or_else(|| "无法确定文档目录".to_string())?;
+    let assets_dir = document_dir.join("assets");
+    fs::create_dir_all(&assets_dir).map_err(|error| format!("无法创建 assets 目录：{error}"))?;
+    let assets_dir =
+        fs::canonicalize(&assets_dir).map_err(|error| format!("无法访问 assets 目录：{error}"))?;
+    if !assets_dir.starts_with(&root) || !assets_dir.is_dir() {
+        return Err("HTML 资源目录不在已打开的目录中".into());
+    }
+
+    let file_name = sanitize_html_name(&metadata.file_name)?;
+    let destination = unique_asset_path(&assets_dir, &file_name, bytes)?;
+    let saved_name = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "HTML 文件名无效".to_string())?;
+    Ok(format!("assets/{saved_name}"))
+}
+
+fn parse_upload_payload(body: &[u8]) -> Result<(AssetUploadMetadata, &[u8]), String> {
     if body.len() < 4 {
         return Err("图片上传请求无效".into());
     }
@@ -408,6 +491,24 @@ fn upload_workspace_image(request: tauri::ipc::Request<'_>) -> Result<String, St
     };
     let (metadata, image_bytes) = parse_upload_payload(body)?;
     save_uploaded_image(metadata, image_bytes)
+}
+
+#[tauri::command]
+fn upload_workspace_html(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("HTML 上传请求必须使用二进制数据".into());
+    };
+    let (metadata, html_bytes) = parse_upload_payload(body)?;
+    save_uploaded_html(metadata, html_bytes)
+}
+
+#[tauri::command]
+fn read_workspace_html(root: String, path: String) -> Result<String, String> {
+    let path = workspace_file_path(&root, &path)?;
+    if !is_html(&path) {
+        return Err("只能读取 HTML 文件".into());
+    }
+    fs::read_to_string(path).map_err(|error| format!("无法读取 HTML 文件：{error}"))
 }
 
 #[tauri::command]
@@ -445,8 +546,10 @@ pub fn run() {
             read_workspace_file,
             save_workspace_file,
             read_workspace_image,
+            read_workspace_html,
             read_workspace_office,
-            upload_workspace_image
+            upload_workspace_image,
+            upload_workspace_html
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -466,6 +569,9 @@ mod tests {
         assert!(is_image(Path::new("photo.JPEG")));
         assert!(is_image(Path::new("icon.svg")));
         assert!(!is_image(Path::new("video.mp4")));
+        assert!(is_html(Path::new("page.html")));
+        assert!(is_html(Path::new("page.HTM")));
+        assert!(!is_html(Path::new("page.xhtml")));
         assert!(is_office(Path::new("document.docx")));
         assert!(is_office(Path::new("workbook.XLSX")));
         assert!(is_office(Path::new("slides.pptx")));
@@ -501,7 +607,7 @@ mod tests {
 
     #[test]
     fn parses_binary_image_upload_payload() {
-        let metadata = ImageUploadMetadata {
+        let metadata = AssetUploadMetadata {
             root: "/notes".into(),
             document_path: "/notes/doc.md".into(),
             file_name: "image.png".into(),
@@ -520,6 +626,48 @@ mod tests {
     }
 
     #[test]
+    fn uploads_and_reads_html_assets() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-html-upload-{unique}"));
+        let docs = root.join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        let document = docs.join("note.md");
+        fs::write(&document, "# note").unwrap();
+
+        let metadata = || AssetUploadMetadata {
+            root: root.to_string_lossy().into_owned(),
+            document_path: document.to_string_lossy().into_owned(),
+            file_name: "交互 demo.HTML".into(),
+        };
+        let relative_path =
+            save_uploaded_html(metadata(), b"<!doctype html><h1>demo</h1>").unwrap();
+        assert_eq!(relative_path, "assets/交互-demo.html");
+        assert_eq!(
+            read_workspace_html(
+                root.to_string_lossy().into_owned(),
+                docs.join(&relative_path).to_string_lossy().into_owned(),
+            )
+            .unwrap(),
+            "<!doctype html><h1>demo</h1>"
+        );
+        assert!(save_uploaded_html(metadata(), b"second").is_ok());
+        assert!(save_uploaded_html(
+            AssetUploadMetadata {
+                root: root.to_string_lossy().into_owned(),
+                document_path: document.to_string_lossy().into_owned(),
+                file_name: "invalid.txt".into(),
+            },
+            b"invalid",
+        )
+        .is_err());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn creates_unique_relative_image_paths() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -531,7 +679,7 @@ mod tests {
         let document = docs.join("note.md");
         fs::write(&document, "# note").unwrap();
 
-        let metadata = || ImageUploadMetadata {
+        let metadata = || AssetUploadMetadata {
             root: root.to_string_lossy().into_owned(),
             document_path: document.to_string_lossy().into_owned(),
             file_name: "示例 image.png".into(),

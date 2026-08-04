@@ -11,9 +11,11 @@ import { toolbar } from "@milkdown/crepe/feature/toolbar";
 import { topBar } from "@milkdown/crepe/feature/top-bar";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
+import { htmlEmbed } from "./htmlEmbed";
 import { isMermaidLanguage, mermaidErrorMessage, renderMermaid } from "./mermaidRenderer";
 import { isPlantUmlLanguage, plantUmlErrorMessage, renderPlantUml } from "./plantumlRenderer";
 import { proxyWorkspaceImage, uploadWorkspaceImage } from "./workspaceImages";
+import { proxyWorkspaceHtml, uploadWorkspaceHtml } from "./workspaceHtml";
 import "@milkdown/crepe/theme/common/reset.css";
 import "@milkdown/crepe/theme/common/prosemirror.css";
 import "@milkdown/crepe/theme/common/code-mirror.css";
@@ -34,7 +36,7 @@ type WysiwygEditorProps = {
   initialValue: string;
   onChange: (markdown: string) => void;
   onReady: (getMarkdown: (() => string) | null) => void;
-  onImageUploaded: () => void;
+  onAssetUploaded: () => void;
 };
 
 function WysiwygEditorInner({
@@ -43,12 +45,13 @@ function WysiwygEditorInner({
   initialValue,
   onChange,
   onReady,
-  onImageUploaded,
+  onAssetUploaded,
 }: WysiwygEditorProps) {
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
-  const onImageUploadedRef = useRef(onImageUploaded);
+  const onAssetUploadedRef = useRef(onAssetUploaded);
   const imageUrlCache = useRef(new Map<string, string>());
+  const htmlUrlCache = useRef(new Map<string, string>());
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -59,12 +62,14 @@ function WysiwygEditorInner({
   }, [onReady]);
 
   useEffect(() => {
-    onImageUploadedRef.current = onImageUploaded;
-  }, [onImageUploaded]);
+    onAssetUploadedRef.current = onAssetUploaded;
+  }, [onAssetUploaded]);
 
   useEffect(() => () => {
     for (const url of imageUrlCache.current.values()) URL.revokeObjectURL(url);
     imageUrlCache.current.clear();
+    for (const url of htmlUrlCache.current.values()) URL.revokeObjectURL(url);
+    htmlUrlCache.current.clear();
   }, []);
 
   useEditor((root) => {
@@ -99,7 +104,7 @@ function WysiwygEditorInner({
       .addFeature(imageBlock, {
         onUpload: async (file) => {
           const source = await uploadWorkspaceImage(workspaceRoot, documentPath, file);
-          onImageUploadedRef.current();
+          onAssetUploadedRef.current();
           return source;
         },
         proxyDomURL: (url) => proxyWorkspaceImage(workspaceRoot, documentPath, url, imageUrlCache.current),
@@ -109,6 +114,11 @@ function WysiwygEditorInner({
         blockUploadPlaceholderText: "或粘贴图片链接",
         blockCaptionPlaceholderText: "图片说明",
         blockConfirmButton: "确认",
+      })
+      .addFeature(htmlEmbed, {
+        uploadHtml: (file) => uploadWorkspaceHtml(workspaceRoot, documentPath, file),
+        proxyHtml: (source) => proxyWorkspaceHtml(workspaceRoot, documentPath, source, htmlUrlCache.current),
+        onAssetUploaded: () => onAssetUploadedRef.current(),
       })
       .addFeature(listItem)
       .addFeature(linkTooltip)

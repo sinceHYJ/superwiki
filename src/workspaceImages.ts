@@ -39,7 +39,7 @@ export async function proxyWorkspaceImage(
   return blobUrl;
 }
 
-function resolveWorkspacePath(root: string, documentPath: string, source: string) {
+export function resolveWorkspacePath(root: string, documentPath: string, source: string) {
   const normalize = (value: string) => value.replace(/\\/g, "/");
   const normalizedRoot = normalize(root).replace(/\/+$/, "");
   const normalizedDocument = normalize(documentPath);

@@ -318,7 +318,7 @@ function App() {
     editorMarkdownRef.current = getMarkdown;
   }, []);
 
-  const handleImageUploaded = useCallback(() => {
+  const handleAssetUploaded = useCallback(() => {
     const root = activeFileRef.current?.root;
     if (!root) return;
 
@@ -737,7 +737,7 @@ function App() {
                     initialValue={content}
                     onChange={handleEditorChange}
                     onReady={handleEditorReady}
-                    onImageUploaded={handleImageUploaded}
+                    onAssetUploaded={handleAssetUploaded}
                   />
                 </Suspense>
               </section>
