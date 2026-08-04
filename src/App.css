@@ -239,6 +239,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .wysiwyg-editor .milkdown .ProseMirror h5 { font-size: 21px; }
 .wysiwyg-editor .milkdown .ProseMirror h6 { font-size: 17px; }
 .wysiwyg-editor .milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 48px; }
+.wysiwyg-editor .milkdown .milkdown-image-block > .image-wrapper img { min-height: 0; }
 
 .html-embed { margin: 20px 0; overflow: hidden; background: #f8f8f4; border: 1px solid #dfe1d7; border-radius: 10px; box-shadow: 0 5px 18px rgba(31, 32, 27, .06); }
 .html-embed.selected { outline: 2px solid var(--accent-outline); outline-offset: 2px; }
