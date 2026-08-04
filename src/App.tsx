@@ -31,6 +31,7 @@ type FileTreeNode = {
   isDir: boolean;
   isMarkdown: boolean;
   isImage: boolean;
+  isOffice: boolean;
   children: FileTreeNode[];
 };
 
@@ -44,7 +45,7 @@ type ActiveFile = {
   root: string;
   path: string;
   name: string;
-  kind: "markdown" | "image";
+  kind: "markdown" | "image" | "office";
 };
 
 type ViewMode = "editor" | "split" | "preview";
@@ -76,6 +77,7 @@ type CreatingEntry = {
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
+const OfficePreview = lazy(() => import("./OfficePreview"));
 
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
@@ -83,6 +85,7 @@ function App() {
   const [content, setContent] = useState("");
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [officeData, setOfficeData] = useState<ArrayBuffer | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -148,6 +151,17 @@ function App() {
           path: file.path,
         });
         replaceImageUrl(URL.createObjectURL(new Blob([imageData], { type: imageMimeType(file.name) })));
+        setOfficeData(null);
+        loadedContent.current = "";
+        contentRef.current = "";
+        setContent("");
+      } else if (file.kind === "office") {
+        const data = await invoke<ArrayBuffer>("read_workspace_office", {
+          root: file.root,
+          path: file.path,
+        });
+        replaceImageUrl(null);
+        setOfficeData(data);
         loadedContent.current = "";
         contentRef.current = "";
         setContent("");
@@ -157,6 +171,7 @@ function App() {
           path: file.path,
         });
         replaceImageUrl(null);
+        setOfficeData(null);
         loadedContent.current = fileContent;
         contentRef.current = fileContent;
         setContent(fileContent);
@@ -204,6 +219,7 @@ function App() {
       setActiveFile(null);
       setContent("");
       replaceImageUrl(null);
+      setOfficeData(null);
       await loadWorkspace(selected);
     } catch (reason) {
       setError(String(reason));
@@ -276,6 +292,7 @@ function App() {
       setActiveFile(null);
       setContent("");
       replaceImageUrl(null);
+      setOfficeData(null);
       setWorkspace(null);
       setError("");
       localStorage.removeItem(WORKSPACE_STORAGE_KEY);
@@ -308,7 +325,7 @@ function App() {
       root: workspace.root,
       path: file.path,
       name: file.name,
-      kind: file.isImage ? "image" : "markdown",
+      kind: file.isImage ? "image" : file.isOffice ? "office" : "markdown",
     });
   }, [openFile, workspace]);
 
@@ -591,6 +608,7 @@ function App() {
                   <span className="meta-separator">·</span>
                   {activeFile.kind === "markdown" && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
                   {activeFile.kind === "image" && <span className="readonly-state">图片预览 · 只读</span>}
+                  {activeFile.kind === "office" && <span className="readonly-state">Office 预览 · 只读</span>}
                 </div>
               )}
             </div>
@@ -622,7 +640,7 @@ function App() {
           <EmptyState
             icon={<img className="welcome-logo" src="/superwiki-logo.png" alt="SuperWiki" />}
             title="打开一个文件夹开始使用"
-            description="选择包含 Markdown 或图片文件的本地文件夹，目录会显示在左侧。"
+            description="选择包含 Markdown、图片、DOCX、XLSX 或 PPTX 文件的本地文件夹，目录会显示在左侧。"
             action="打开文件夹"
             onAction={() => void selectWorkspace()}
           />
@@ -636,7 +654,7 @@ function App() {
           <EmptyState
             icon={<FileCode2 size={32} />}
             title="选择一个 Markdown 或图片文件"
-            description="从左侧目录中选择 Markdown 文件进行编辑，或选择图片进行只读预览。"
+            description="从左侧目录中选择 Markdown 文件进行编辑，或选择图片、DOCX、XLSX、PPTX 进行只读预览。"
           />
         )}
 
@@ -682,6 +700,12 @@ function App() {
               <img src={imageUrl} alt={activeFile.name} />
             </div>
           </section>
+        )}
+
+        {activeFile?.kind === "office" && officeData && (
+          <Suspense fallback={<div className="editor-loading">正在加载 Office 预览器…</div>}>
+            <OfficePreview data={officeData} name={activeFile.name} />
+          </Suspense>
         )}
       </section>
     </main>
@@ -838,7 +862,7 @@ function TreeNode({
     );
   }
 
-  const fileRowClassName = `tree-row file ${activePath === node.path ? "active" : ""} ${node.isMarkdown || node.isImage ? "" : "unsupported"}`;
+  const fileRowClassName = `tree-row file ${activePath === node.path ? "active" : ""} ${node.isMarkdown || node.isImage || node.isOffice ? "" : "unsupported"}`;
   const fileIcon = node.isMarkdown
     ? <FileCode2 size={14} />
     : node.isImage
@@ -860,10 +884,10 @@ function TreeNode({
       role="treeitem"
       className={fileRowClassName}
       style={style}
-      aria-disabled={!node.isMarkdown && !node.isImage}
-      title={node.isMarkdown || node.isImage ? node.path : "当前仅支持 Markdown 编辑和图片预览，右键可重命名"}
+      aria-disabled={!node.isMarkdown && !node.isImage && !node.isOffice}
+      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可重命名"}
       onClick={() => {
-        if (node.isMarkdown || node.isImage) onOpen(node);
+        if (node.isMarkdown || node.isImage || node.isOffice) onOpen(node);
       }}
       onContextMenu={(event) => onContextMenu(event, node)}
     >

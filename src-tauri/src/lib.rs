@@ -13,6 +13,7 @@ struct FileTreeNode {
     is_dir: bool,
     is_markdown: bool,
     is_image: bool,
+    is_office: bool,
     children: Vec<FileTreeNode>,
 }
 
@@ -50,6 +51,17 @@ fn is_image(path: &Path) -> bool {
         })
 }
 
+fn is_office(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "docx" | "xlsx" | "pptx"
+            )
+        })
+}
+
 fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
     let mut nodes = Vec::new();
     let entries = fs::read_dir(path).map_err(|error| error.to_string())?;
@@ -71,6 +83,7 @@ fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
             is_dir,
             is_markdown: !is_dir && is_markdown(&entry_path),
             is_image: !is_dir && is_image(&entry_path),
+            is_office: !is_dir && is_office(&entry_path),
             children,
         });
     }
@@ -185,6 +198,9 @@ fn rename_workspace_file(root: String, path: String, new_name: String) -> Result
     }
     if is_image(&path) && !is_image(&destination) {
         return Err("图片重命名后必须保留支持的图片扩展名".into());
+    }
+    if is_office(&path) && !is_office(&destination) {
+        return Err("Office 文件重命名后必须保留 .docx、.xlsx 或 .pptx 扩展名".into());
     }
     if destination.exists() {
         return Err("同名文件或文件夹已存在".into());
@@ -405,6 +421,17 @@ fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Respon
         .map_err(|error| format!("无法读取图片：{error}"))
 }
 
+#[tauri::command]
+fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Response, String> {
+    let path = workspace_file_path(&root, &path)?;
+    if !is_office(&path) {
+        return Err("只能预览 DOCX、XLSX 或 PPTX 文件".into());
+    }
+    fs::read(path)
+        .map(tauri::ipc::Response::new)
+        .map_err(|error| format!("无法读取 Office 文件：{error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -418,6 +445,7 @@ pub fn run() {
             read_workspace_file,
             save_workspace_file,
             read_workspace_image,
+            read_workspace_office,
             upload_workspace_image
         ])
         .run(tauri::generate_context!())
@@ -438,6 +466,37 @@ mod tests {
         assert!(is_image(Path::new("photo.JPEG")));
         assert!(is_image(Path::new("icon.svg")));
         assert!(!is_image(Path::new("video.mp4")));
+        assert!(is_office(Path::new("document.docx")));
+        assert!(is_office(Path::new("workbook.XLSX")));
+        assert!(is_office(Path::new("slides.pptx")));
+        assert!(!is_office(Path::new("legacy.doc")));
+        assert!(!is_office(Path::new("document.pdf")));
+    }
+
+    #[test]
+    fn reads_only_supported_office_files() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-office-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        let office = root.join("document.docx");
+        let unsupported = root.join("document.doc");
+        fs::write(&office, b"office-bytes").unwrap();
+        fs::write(&unsupported, b"legacy-office-bytes").unwrap();
+
+        let root_string = root.to_string_lossy().into_owned();
+        assert!(
+            read_workspace_office(root_string.clone(), office.to_string_lossy().into_owned(),)
+                .is_ok()
+        );
+        assert!(
+            read_workspace_office(root_string, unsupported.to_string_lossy().into_owned(),)
+                .is_err()
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
