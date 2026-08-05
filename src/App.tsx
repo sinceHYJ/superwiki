@@ -62,6 +62,7 @@ type DocumentHeading = {
 
 type DirectoryContextMenu = {
   node: FileTreeNode;
+  isWorkspaceRoot: boolean;
   x: number;
   y: number;
 };
@@ -370,25 +371,30 @@ function App() {
     });
   }, [openFile, workspace]);
 
-  const openDirectoryContextMenu = useCallback((event: React.MouseEvent, node: FileTreeNode) => {
+  const openDirectoryContextMenu = useCallback((
+    event: React.MouseEvent,
+    node: FileTreeNode,
+    isWorkspaceRoot = false,
+  ) => {
     event.preventDefault();
     event.stopPropagation();
     setCreateEntryMenu(null);
     setCreatingEntry(null);
     setDirectoryContextMenu({
       node,
+      isWorkspaceRoot,
       x: Math.min(event.clientX, window.innerWidth - 170),
-      y: Math.min(event.clientY, window.innerHeight - (node.isMarkdown ? 104 : 74)),
+      y: Math.min(event.clientY, window.innerHeight - (isWorkspaceRoot ? 44 : 104)),
     });
   }, []);
 
-  const revealMarkdownFile = useCallback(async (node: FileTreeNode) => {
-    if (!workspace || !node.isMarkdown) return;
+  const openInFileManager = useCallback(async (node: FileTreeNode) => {
+    if (!workspace) return;
 
     setDirectoryContextMenu(null);
     try {
       setError("");
-      await invoke("reveal_workspace_markdown_file", {
+      await invoke("open_workspace_entry_in_file_manager", {
         root: workspace.root,
         path: node.path,
       });
@@ -649,7 +655,18 @@ function App() {
           )}
           {!workspaceLoading && workspace && (
             <div className="file-tree" role="tree" aria-label={`${workspace.name} 文件目录`}>
-              <div className="workspace-root">
+              <div
+                className="workspace-root"
+                onContextMenu={(event) => openDirectoryContextMenu(event, {
+                  name: workspace.name,
+                  path: workspace.root,
+                  isDir: true,
+                  isMarkdown: false,
+                  isImage: false,
+                  isOffice: false,
+                  children: workspace.children,
+                }, true)}
+              >
                 <FolderOpen size={15} />
                 <strong>{workspace.name}</strong>
                 <button
@@ -723,22 +740,24 @@ function App() {
             style={{ left: directoryContextMenu.x, top: directoryContextMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
-            {directoryContextMenu.node.isMarkdown && (
-              <button onClick={() => void revealMarkdownFile(directoryContextMenu.node)}>
-                <FolderOpen size={13} />{OPEN_IN_FILE_MANAGER_LABEL}
-              </button>
+            <button onClick={() => void openInFileManager(directoryContextMenu.node)}>
+              <FolderOpen size={13} />{OPEN_IN_FILE_MANAGER_LABEL}
+            </button>
+            {!directoryContextMenu.isWorkspaceRoot && (
+              <>
+                <button
+                  onClick={() => {
+                    setRenamingPath(directoryContextMenu.node.path);
+                    setDirectoryContextMenu(null);
+                  }}
+                >
+                  <Pencil size={13} />重命名
+                </button>
+                <button className="danger" onClick={() => void deleteTreeNode(directoryContextMenu.node)}>
+                  <Trash2 size={13} />删除
+                </button>
+              </>
             )}
-            <button
-              onClick={() => {
-                setRenamingPath(directoryContextMenu.node.path);
-                setDirectoryContextMenu(null);
-              }}
-            >
-              <Pencil size={13} />重命名
-            </button>
-            <button className="danger" onClick={() => void deleteTreeNode(directoryContextMenu.node)}>
-              <Trash2 size={13} />删除
-            </button>
           </div>
         )}
 
@@ -1115,7 +1134,7 @@ function TreeNode({
       className={fileRowClassName}
       style={style}
       aria-disabled={!node.isMarkdown && !node.isImage && !node.isOffice}
-      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可重命名或删除"}
+      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可在文件管理器中打开、重命名或删除"}
       onClick={() => {
         if (node.isMarkdown || node.isImage || node.isOffice) onOpen(node);
       }}

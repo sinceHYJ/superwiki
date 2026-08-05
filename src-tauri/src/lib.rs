@@ -106,11 +106,19 @@ fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
     Ok(nodes)
 }
 
-fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
+fn workspace_entry_path(root: &str, path: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
 
-    if !root.is_dir() || !path.starts_with(&root) || !path.is_file() {
+    if !root.is_dir() || !path.starts_with(&root) || (!path.is_file() && !path.is_dir()) {
+        return Err("文件或文件夹不在已打开的目录中".into());
+    }
+    Ok(path)
+}
+
+fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
+    let path = workspace_entry_path(root, path)?;
+    if !path.is_file() {
         return Err("文件不在已打开的目录中".into());
     }
     Ok(path)
@@ -536,18 +544,21 @@ fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Respon
 }
 
 #[tauri::command]
-fn reveal_workspace_markdown_file(
+fn open_workspace_entry_in_file_manager(
     app: tauri::AppHandle,
     root: String,
     path: String,
 ) -> Result<(), String> {
-    let path = workspace_file_path(&root, &path)?;
-    if !is_markdown(&path) {
-        return Err("只能在文件管理器中打开 Markdown 文件".into());
+    let path = workspace_entry_path(&root, &path)?;
+    if path.is_dir() {
+        app.opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|error| format!("无法打开文件夹：{error}"))
+    } else {
+        app.opener()
+            .reveal_item_in_dir(path)
+            .map_err(|error| format!("无法打开文件所在目录：{error}"))
     }
-    app.opener()
-        .reveal_item_in_dir(path)
-        .map_err(|error| format!("无法打开文件所在目录：{error}"))
 }
 
 #[tauri::command]
@@ -576,7 +587,7 @@ pub fn run() {
             create_workspace_markdown_file,
             read_workspace_file,
             save_workspace_file,
-            reveal_workspace_markdown_file,
+            open_workspace_entry_in_file_manager,
             read_workspace_image,
             read_workspace_html,
             read_workspace_office,
@@ -968,21 +979,25 @@ mod tests {
     }
 
     #[test]
-    fn workspace_files_must_stay_inside_root() {
+    fn workspace_entries_must_stay_inside_root() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let base = std::env::temp_dir().join(format!("superwiki-test-{unique}"));
         let root = base.join("root");
-        let inside = root.join("note.md");
-        let outside = base.join("outside.md");
-        fs::create_dir_all(&root).unwrap();
-        fs::write(&inside, "# inside").unwrap();
-        fs::write(&outside, "# outside").unwrap();
+        let directory = root.join("notes");
+        let inside = root.join("note.txt");
+        let outside = base.join("outside.txt");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&inside, "inside").unwrap();
+        fs::write(&outside, "outside").unwrap();
 
-        assert!(workspace_file_path(root.to_str().unwrap(), inside.to_str().unwrap()).is_ok());
-        assert!(workspace_file_path(root.to_str().unwrap(), outside.to_str().unwrap()).is_err());
+        assert!(workspace_entry_path(root.to_str().unwrap(), root.to_str().unwrap()).is_ok());
+        assert!(workspace_entry_path(root.to_str().unwrap(), directory.to_str().unwrap()).is_ok());
+        assert!(workspace_entry_path(root.to_str().unwrap(), inside.to_str().unwrap()).is_ok());
+        assert!(workspace_entry_path(root.to_str().unwrap(), outside.to_str().unwrap()).is_err());
+        assert!(workspace_file_path(root.to_str().unwrap(), directory.to_str().unwrap()).is_err());
 
         fs::remove_dir_all(base).unwrap();
     }
