@@ -29,6 +29,7 @@
     "@plantuml/core": "^1.2026.6",
     "@silurus/ooxml": "0.75.2",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "lucide-react": "^1.28.0",
     "mermaid": "^11.16.0",

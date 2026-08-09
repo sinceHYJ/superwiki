@@ -1,10 +1,12 @@
 import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ChevronRight,
   Columns2,
+  Copy,
   File,
   FileCode2,
   Folder,
@@ -384,8 +386,18 @@ function App() {
       node,
       isWorkspaceRoot,
       x: Math.min(event.clientX, window.innerWidth - 170),
-      y: Math.min(event.clientY, window.innerHeight - (isWorkspaceRoot ? 44 : 104)),
+      y: Math.min(event.clientY, window.innerHeight - (isWorkspaceRoot ? 70 : 130)),
     });
+  }, []);
+
+  const copyAbsolutePath = useCallback(async (node: FileTreeNode) => {
+    setDirectoryContextMenu(null);
+    try {
+      setError("");
+      await writeText(node.path);
+    } catch (reason) {
+      setError(`无法复制绝对路径：${String(reason)}`);
+    }
   }, []);
 
   const openInFileManager = useCallback(async (node: FileTreeNode) => {
@@ -742,6 +754,9 @@ function App() {
           >
             <button onClick={() => void openInFileManager(directoryContextMenu.node)}>
               <FolderOpen size={13} />{OPEN_IN_FILE_MANAGER_LABEL}
+            </button>
+            <button onClick={() => void copyAbsolutePath(directoryContextMenu.node)}>
+              <Copy size={13} />复制绝对路径
             </button>
             {!directoryContextMenu.isWorkspaceRoot && (
               <>
