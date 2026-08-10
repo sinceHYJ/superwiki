@@ -5,7 +5,6 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ChevronRight,
-  Columns2,
   Copy,
   File,
   FileCode2,
@@ -53,7 +52,7 @@ type ActiveFile = {
   kind: "markdown" | "image" | "office";
 };
 
-type ViewMode = "editor" | "split" | "preview";
+type ViewMode = "editor" | "preview";
 type SaveState = "saved" | "saving" | "error";
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
 
@@ -854,7 +853,6 @@ function App() {
             <div className="toolbar-actions">
               <div className="view-switcher" aria-label="视图模式">
                 <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
-                <button className={viewMode === "split" ? "active" : ""} onClick={() => changeViewMode("split")} title="分栏"><Columns2 size={15} /></button>
                 <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
               </div>
               <button
