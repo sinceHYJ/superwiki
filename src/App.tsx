@@ -84,9 +84,10 @@ type CreatingEntry = {
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
 const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
+const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "yellow", name: "明亮黄", color: "#d9ed72" },
-  { id: "sky", name: "天蓝色", color: "#7dd3fc" },
+  { id: "sky", name: "天蓝色", color: "oklch(0.6331 0.0643 238.60)" },
   { id: "mint", name: "薄荷绿", color: "#86efac" },
   { id: "coral", name: "珊瑚粉", color: "#fda4af" },
   { id: "lavender", name: "薰衣草紫", color: "#c4b5fd" },
@@ -120,7 +121,17 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
     const storedTheme = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
-    return isThemeColor(storedTheme) ? storedTheme : "yellow";
+    const redesignMigrated = localStorage.getItem(THEME_COLOR_REDESIGN_MIGRATION_KEY) === "1";
+
+    if (!redesignMigrated) {
+      localStorage.setItem(THEME_COLOR_REDESIGN_MIGRATION_KEY, "1");
+      if (!storedTheme || storedTheme === "yellow") {
+        localStorage.setItem(THEME_COLOR_STORAGE_KEY, "sky");
+        return "sky";
+      }
+    }
+
+    return isThemeColor(storedTheme) ? storedTheme : "sky";
   });
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -638,13 +649,21 @@ function App() {
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
       <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark"><img src="/superwiki-logo.png" alt="" /></span>
-          <span>SuperWiki</span>
+        <div className="sidebar-head">
+          <div className="library-identity">
+            <span className="brand-mark"><img src="/superwiki-logo.png" alt="" /></span>
+            <span className="library-name">
+              {workspace?.name ?? "个人知识库"}
+              <small>{workspace ? "本地工作区" : "尚未选择文件夹"}</small>
+            </span>
+          </div>
+          <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
+            <PanelLeftClose size={17} />
+          </button>
         </div>
 
         <button className="open-folder primary" onClick={() => void selectWorkspace()}>
-          <FolderOpen size={17} /> 打开文件夹
+          <FolderOpen size={16} /> {workspace ? "更换文件夹" : "打开文件夹"}
         </button>
 
         <div className="sidebar-content folder-only">
@@ -777,15 +796,17 @@ function App() {
         )}
 
         <div className="sidebar-footer">
-          <span>Markdown · 图片预览</span>
           <button
             className="settings-button"
             onClick={() => setSettingsOpen(true)}
             title="设置"
             aria-label="打开设置"
           >
-            <Settings size={16} />
+            <Settings size={15} />
+            <span>偏好设置</span>
+            <small>本地</small>
           </button>
+          <div className="local-storage-note">Markdown · 图片与 Office 预览</div>
         </div>
       </aside>
 
