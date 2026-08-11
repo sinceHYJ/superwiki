@@ -14,7 +14,6 @@ import {
   PanelLeftClose,
   PanelRightClose,
   Pencil,
-  Plus,
   RefreshCw,
   Settings,
   Trash2,
@@ -69,12 +68,6 @@ type DirectoryContextMenu = {
 };
 
 type CreateEntryKind = "file" | "directory";
-
-type CreateEntryMenu = {
-  parentPath: string;
-  x: number;
-  y: number;
-};
 
 type CreatingEntry = {
   parentPath: string;
@@ -135,7 +128,6 @@ function App() {
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
-  const [createEntryMenu, setCreateEntryMenu] = useState<CreateEntryMenu | null>(null);
   const [creatingEntry, setCreatingEntry] = useState<CreatingEntry | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -255,7 +247,6 @@ function App() {
       await flushPendingSave();
       activeFileRef.current = null;
       setDirectoryContextMenu(null);
-      setCreateEntryMenu(null);
       setCreatingEntry(null);
       setRenamingPath(null);
       loadedContent.current = "";
@@ -275,22 +266,19 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!directoryContextMenu && !createEntryMenu) return;
+    if (!directoryContextMenu) return;
 
-    const closeMenus = () => {
-      setDirectoryContextMenu(null);
-      setCreateEntryMenu(null);
-    };
+    const closeMenu = () => setDirectoryContextMenu(null);
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenus();
+      if (event.key === "Escape") closeMenu();
     };
-    window.addEventListener("click", closeMenus);
+    window.addEventListener("click", closeMenu);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("click", closeMenus);
+      window.removeEventListener("click", closeMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [createEntryMenu, directoryContextMenu]);
+  }, [directoryContextMenu]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -338,7 +326,6 @@ function App() {
       await flushPendingSave();
       activeFileRef.current = null;
       setDirectoryContextMenu(null);
-      setCreateEntryMenu(null);
       setCreatingEntry(null);
       setRenamingPath(null);
       loadedContent.current = "";
@@ -390,13 +377,12 @@ function App() {
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    setCreateEntryMenu(null);
     setCreatingEntry(null);
     setDirectoryContextMenu({
       node,
       isWorkspaceRoot,
       x: Math.min(event.clientX, window.innerWidth - 170),
-      y: Math.min(event.clientY, window.innerHeight - (isWorkspaceRoot ? 70 : 130)),
+      y: Math.min(event.clientY, window.innerHeight - (node.isDir && !isWorkspaceRoot ? 196 : 136)),
     });
   }, []);
 
@@ -424,18 +410,6 @@ function App() {
       setError(`无法在文件管理器中打开：${String(reason)}`);
     }
   }, [workspace]);
-
-  const openCreateEntryMenu = useCallback((event: React.MouseEvent, parentPath: string) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setDirectoryContextMenu(null);
-    setRenamingPath(null);
-    setCreateEntryMenu({
-      parentPath,
-      x: Math.min(event.clientX, window.innerWidth - 160),
-      y: Math.min(event.clientY, window.innerHeight - 76),
-    });
-  }, []);
 
   const createWorkspaceEntry = useCallback(async (
     parentPath: string,
@@ -699,13 +673,6 @@ function App() {
               >
                 <FolderOpen size={15} />
                 <strong>{workspace.name}</strong>
-                <button
-                  className="tree-add-button"
-                  title="在根目录中新建"
-                  onClick={(event) => openCreateEntryMenu(event, workspace.root)}
-                >
-                  <Plus size={14} />
-                </button>
               </div>
               {creatingEntry?.parentPath === workspace.root && (
                 <CreateEntryInput
@@ -725,7 +692,6 @@ function App() {
                   creatingEntry={creatingEntry}
                   onOpen={openTreeFile}
                   onContextMenu={openDirectoryContextMenu}
-                  onAdd={openCreateEntryMenu}
                   onRename={renameTreeNode}
                   onCreateEntry={createWorkspaceEntry}
                   onCancelRename={() => setRenamingPath(null)}
@@ -739,37 +705,34 @@ function App() {
           )}
         </div>
 
-        {createEntryMenu && (
-          <div
-            className="directory-context-menu create-entry-menu"
-            style={{ left: createEntryMenu.x, top: createEntryMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              onClick={() => {
-                setCreatingEntry({ parentPath: createEntryMenu.parentPath, kind: "file" });
-                setCreateEntryMenu(null);
-              }}
-            >
-              <FileCode2 size={14} />文件
-            </button>
-            <button
-              onClick={() => {
-                setCreatingEntry({ parentPath: createEntryMenu.parentPath, kind: "directory" });
-                setCreateEntryMenu(null);
-              }}
-            >
-              <Folder size={14} />文件夹
-            </button>
-          </div>
-        )}
-
         {directoryContextMenu && (
           <div
             className="directory-context-menu"
             style={{ left: directoryContextMenu.x, top: directoryContextMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
+            {directoryContextMenu.node.isDir && (
+              <>
+                <button
+                  onClick={() => {
+                    setCreatingEntry({ parentPath: directoryContextMenu.node.path, kind: "file" });
+                    setRenamingPath(null);
+                    setDirectoryContextMenu(null);
+                  }}
+                >
+                  <FileCode2 size={13} />新建文档
+                </button>
+                <button
+                  onClick={() => {
+                    setCreatingEntry({ parentPath: directoryContextMenu.node.path, kind: "directory" });
+                    setRenamingPath(null);
+                    setDirectoryContextMenu(null);
+                  }}
+                >
+                  <Folder size={13} />新建文件夹
+                </button>
+              </>
+            )}
             <button onClick={() => void openInFileManager(directoryContextMenu.node)}>
               <FolderOpen size={13} />{OPEN_IN_FILE_MANAGER_LABEL}
             </button>
@@ -1022,7 +985,6 @@ type TreeNodeProps = {
   creatingEntry: CreatingEntry | null;
   onOpen: (node: FileTreeNode) => void;
   onContextMenu: (event: React.MouseEvent, node: FileTreeNode) => void;
-  onAdd: (event: React.MouseEvent, parentPath: string) => void;
   onRename: (node: FileTreeNode, name: string) => Promise<boolean>;
   onCreateEntry: (parentPath: string, kind: CreateEntryKind, name: string) => Promise<boolean>;
   onCancelRename: () => void;
@@ -1037,7 +999,6 @@ function TreeNode({
   creatingEntry,
   onOpen,
   onContextMenu,
-  onAdd,
   onRename,
   onCreateEntry,
   onCancelRename,
@@ -1106,15 +1067,6 @@ function TreeNode({
           <Folder className="folder-closed" size={15} />
           <FolderOpen className="folder-open" size={15} />
           {renaming ? renameInput : <span className="tree-name">{node.name}</span>}
-          {!renaming && (
-            <button
-              className="tree-add-button"
-              title={`在 ${node.name} 中新建`}
-              onClick={(event) => onAdd(event, node.path)}
-            >
-              <Plus size={14} />
-            </button>
-          )}
         </summary>
         {creatingHere && creatingEntry && (
           <CreateEntryInput
@@ -1134,7 +1086,6 @@ function TreeNode({
             creatingEntry={creatingEntry}
             onOpen={onOpen}
             onContextMenu={onContextMenu}
-            onAdd={onAdd}
             onRename={onRename}
             onCreateEntry={onCreateEntry}
             onCancelRename={onCancelRename}
