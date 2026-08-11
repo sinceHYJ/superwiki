@@ -1037,7 +1037,6 @@ function App() {
             <span>偏好设置</span>
             <small>本地</small>
           </button>
-          <div className="local-storage-note">Markdown · 图片与 Office 预览</div>
         </div>
       </aside>
 
