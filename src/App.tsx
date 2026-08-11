@@ -16,6 +16,7 @@ import {
   PanelRightClose,
   Pencil,
   RefreshCw,
+  Search,
   Settings,
   Star,
   Trash2,
@@ -130,6 +131,7 @@ function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("document");
   const [recentEditedDocuments, setRecentEditedDocuments] = useState<RecentEditedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
+  const [documentSearchQuery, setDocumentSearchQuery] = useState("");
   const [content, setContent] = useState("");
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -310,6 +312,7 @@ function App() {
       setCreatingEntry(null);
       setRenamingPath(null);
       setWorkspaceView("document");
+      setDocumentSearchQuery("");
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -391,6 +394,7 @@ function App() {
       setCreatingEntry(null);
       setRenamingPath(null);
       setWorkspaceView("document");
+      setDocumentSearchQuery("");
       setRecentEditedDocuments([]);
       setFavoriteDocuments([]);
       loadedContent.current = "";
@@ -802,6 +806,13 @@ function App() {
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
   const documentViewActivePath = workspaceView === "document" ? activeFile?.path ?? null : null;
+  const normalizedDocumentSearchQuery = documentSearchQuery.trim().toLocaleLowerCase();
+  const documentSearchResults = useMemo(
+    () => workspace && normalizedDocumentSearchQuery
+      ? collectMatchingMarkdownDocuments(workspace.children, normalizedDocumentSearchQuery)
+      : [],
+    [normalizedDocumentSearchQuery, workspace],
+  );
   const activeFileFavorited = activeFile?.kind === "markdown"
     && favoriteDocuments.some((document) => document.path === activeFile.path);
 
@@ -823,6 +834,30 @@ function App() {
           <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
             <PanelLeftClose size={17} />
           </button>
+        </div>
+
+        <div className="document-search-wrap">
+          <Search size={15} aria-hidden="true" />
+          <input
+            className="document-search"
+            type="search"
+            value={documentSearchQuery}
+            placeholder="搜索文档名称"
+            aria-label="搜索 Markdown 文档名称"
+            disabled={!workspace}
+            onChange={(event) => setDocumentSearchQuery(event.target.value)}
+          />
+          {documentSearchQuery && (
+            <button
+              className="document-search-clear"
+              type="button"
+              title="清空搜索"
+              aria-label="清空搜索"
+              onClick={() => setDocumentSearchQuery("")}
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
 
         <button className="open-folder primary" onClick={() => void selectWorkspace()}>
@@ -871,7 +906,27 @@ function App() {
               <span><strong>尚未打开文件夹</strong><small>点击选择本地文件夹</small></span>
             </button>
           )}
-          {!workspaceLoading && workspace && (
+          {!workspaceLoading && workspace && normalizedDocumentSearchQuery && (
+            <div className="file-tree document-search-results" role="tree" aria-label="文档搜索结果">
+              <div className="document-search-summary">找到 {documentSearchResults.length} 个文档</div>
+              {documentSearchResults.map((node) => (
+                <button
+                  key={node.path}
+                  role="treeitem"
+                  className={`tree-row file search-result ${documentViewActivePath === node.path ? "active" : ""}`}
+                  title={node.path}
+                  onClick={() => openTreeFile(node)}
+                >
+                  <FileCode2 size={14} />
+                  <span className="tree-name">{node.name}</span>
+                </button>
+              ))}
+              {documentSearchResults.length === 0 && (
+                <div className="empty-directory document-search-empty">没有匹配的 Markdown 文档</div>
+              )}
+            </div>
+          )}
+          {!workspaceLoading && workspace && !normalizedDocumentSearchQuery && (
             <div className="file-tree" role="tree" aria-label={`${workspace.name} 文件目录`}>
               <div
                 className="workspace-root"
@@ -1731,6 +1786,23 @@ function writeRecentEditedDocuments(root: string, documents: RecentEditedDocumen
   } catch {
     // 最近编辑是辅助状态，写入失败不能影响文档保存。
   }
+}
+
+function collectMatchingMarkdownDocuments(nodes: FileTreeNode[], normalizedQuery: string) {
+  const matches: FileTreeNode[] = [];
+
+  const collectMatches = (entries: FileTreeNode[]) => {
+    for (const entry of entries) {
+      if (entry.isDir) {
+        collectMatches(entry.children);
+      } else if (entry.isMarkdown && entry.name.toLocaleLowerCase().includes(normalizedQuery)) {
+        matches.push(entry);
+      }
+    }
+  };
+
+  collectMatches(nodes);
+  return matches;
 }
 
 function collectWorkspaceMarkdownPaths(tree: WorkspaceTree) {

@@ -464,6 +464,75 @@ body {
   border: 0;
 }
 
+.document-search-wrap {
+  position: relative;
+  margin: 0 12px 12px;
+}
+
+.document-search-wrap > svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  color: var(--ui-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.document-search {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 35px;
+  color: var(--ui-text);
+  font: inherit;
+  font-size: 12px;
+  appearance: none;
+  background: #fff;
+  border: 1px solid var(--ui-border);
+  border-radius: 9px;
+  outline: none;
+}
+
+.document-search::placeholder {
+  color: var(--ui-subtle);
+}
+
+.document-search::-webkit-search-cancel-button {
+  display: none;
+}
+
+.document-search:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.document-search:disabled {
+  color: var(--ui-subtle);
+  background: #f2f2ee;
+  cursor: not-allowed;
+}
+
+.document-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  place-items: center;
+  transform: translateY(-50%);
+}
+
+.document-search-clear:hover {
+  color: var(--ui-text);
+  background: var(--ui-hover);
+}
+
 .open-folder {
   width: auto;
   height: 40px;
@@ -584,6 +653,21 @@ button.folder-placeholder:hover {
 .tree-row.unsupported,
 .tree-row.unsupported:hover {
   color: #b0b2ac;
+}
+
+.document-search-summary {
+  padding: 2px 8px 7px;
+  color: var(--ui-subtle);
+  font-size: 10px;
+}
+
+.tree-row.search-result {
+  padding-left: 8px;
+}
+
+.document-search-empty {
+  padding-top: 22px;
+  line-height: 1.6;
 }
 
 .tree-create-row {
