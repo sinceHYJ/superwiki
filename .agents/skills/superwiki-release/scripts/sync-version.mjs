@@ -100,7 +100,7 @@ function syncVersion(version) {
 
   const packageJson = readJson(paths.packageJson);
   const packageLock = readJson(paths.packageLock);
-  const tauriConfig = readJson(paths.tauriConfig);
+  let tauriConfig = fs.readFileSync(paths.tauriConfig, "utf8");
   let cargoToml = fs.readFileSync(paths.cargoToml, "utf8");
   let cargoLock = fs.readFileSync(paths.cargoLock, "utf8");
 
@@ -110,7 +110,11 @@ function syncVersion(version) {
     throw new Error('package-lock.json 缺少 packages[""] 根包信息');
   }
   packageLock.packages[""].version = version;
-  tauriConfig.version = version;
+  const tauriVersionPattern = /(^\s*"version"\s*:\s*")[^"]+("[,]?\s*$)/m;
+  if (!tauriVersionPattern.test(tauriConfig)) {
+    throw new Error("未在 tauri.conf.json 中找到 version");
+  }
+  tauriConfig = tauriConfig.replace(tauriVersionPattern, `$1${version}$2`);
 
   const packageSectionPattern = /(^\[package\]\s*\n[\s\S]*?^version\s*=\s*")[^"]+("$)/m;
   if (!packageSectionPattern.test(cargoToml)) {
@@ -121,7 +125,7 @@ function syncVersion(version) {
 
   writeJson(paths.packageJson, packageJson);
   writeJson(paths.packageLock, packageLock);
-  writeJson(paths.tauriConfig, tauriConfig);
+  fs.writeFileSync(paths.tauriConfig, tauriConfig);
   fs.writeFileSync(paths.cargoToml, cargoToml);
   fs.writeFileSync(paths.cargoLock, cargoLock);
 
