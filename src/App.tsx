@@ -17,6 +17,7 @@ import {
   Pencil,
   RefreshCw,
   Settings,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
@@ -53,7 +54,7 @@ type ActiveFile = {
 };
 
 type ViewMode = "editor" | "preview";
-type WorkspaceView = "document" | "recent";
+type WorkspaceView = "document" | "recent" | "favorites";
 type SaveState = "saved" | "saving" | "error";
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
 
@@ -86,8 +87,19 @@ type RecentEditedDocument = {
 
 type RecentEditedStorage = Record<string, RecentEditedDocument[]>;
 
+type FavoriteDocument = {
+  root: string;
+  path: string;
+  name: string;
+  relativePath: string;
+  favoritedAt: number;
+};
+
+type FavoriteStorage = Record<string, FavoriteDocument[]>;
+
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
 const RECENT_EDITED_STORAGE_KEY = "superwiki.recentEditedDocuments";
+const FAVORITE_STORAGE_KEY = "superwiki.favoriteDocuments";
 const MAX_RECENT_EDITED_DOCUMENTS = 20;
 const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
 const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
@@ -117,6 +129,7 @@ function App() {
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("document");
   const [recentEditedDocuments, setRecentEditedDocuments] = useState<RecentEditedDocument[]>([]);
+  const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
   const [content, setContent] = useState("");
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -268,13 +281,17 @@ function App() {
       setError("");
       const tree = await invoke<WorkspaceTree>("list_workspace", { root });
       const recentDocuments = filterExistingRecentDocuments(tree, readRecentEditedDocuments(tree.root));
+      const favorites = filterExistingFavoriteDocuments(tree, readFavoriteDocuments(tree.root));
       setWorkspace(tree);
       setRecentEditedDocuments(recentDocuments);
+      setFavoriteDocuments(favorites);
       writeRecentEditedDocuments(tree.root, recentDocuments);
+      writeFavoriteDocuments(tree.root, favorites);
       if (remember) localStorage.setItem(WORKSPACE_STORAGE_KEY, tree.root);
     } catch (reason) {
       setWorkspace(null);
       setRecentEditedDocuments([]);
+      setFavoriteDocuments([]);
       localStorage.removeItem(WORKSPACE_STORAGE_KEY);
       setError(`无法打开文件夹：${String(reason)}`);
     } finally {
@@ -375,6 +392,7 @@ function App() {
       setRenamingPath(null);
       setWorkspaceView("document");
       setRecentEditedDocuments([]);
+      setFavoriteDocuments([]);
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -417,18 +435,38 @@ function App() {
     });
   }, [openFile, workspace]);
 
-  const showRecentEditedDocuments = useCallback(async () => {
+  const showQuickAccessView = useCallback(async (view: "recent" | "favorites") => {
     if (!workspace) return;
 
     try {
       setError("");
       await flushPendingSave();
       setSaveState("saved");
-      setWorkspaceView("recent");
+      setWorkspaceView(view);
     } catch (reason) {
-      setError(`无法打开最近编辑：${String(reason)}`);
+      setError(`无法打开${view === "recent" ? "最近编辑" : "我的收藏"}：${String(reason)}`);
     }
   }, [flushPendingSave, workspace]);
+
+  const toggleActiveFileFavorite = useCallback(() => {
+    const file = activeFileRef.current;
+    if (!file || file.kind !== "markdown") return;
+
+    const current = readFavoriteDocuments(file.root);
+    const exists = current.some((document) => document.path === file.path);
+    const nextDocuments = exists
+      ? current.filter((document) => document.path !== file.path)
+      : [{
+          root: file.root,
+          path: file.path,
+          name: file.name,
+          relativePath: workspaceRelativePath(file.root, file.path, file.name),
+          favoritedAt: Date.now(),
+        }, ...current];
+
+    writeFavoriteDocuments(file.root, nextDocuments);
+    setFavoriteDocuments(nextDocuments);
+  }, []);
 
   const openRecentEditedDocument = useCallback(async (document: RecentEditedDocument) => {
     const opened = await openFile({
@@ -442,6 +480,23 @@ function App() {
       setRecentEditedDocuments((current) => {
         const nextDocuments = current.filter((item) => item.path !== document.path);
         writeRecentEditedDocuments(document.root, nextDocuments);
+        return nextDocuments;
+      });
+    }
+  }, [openFile]);
+
+  const openFavoriteDocument = useCallback(async (document: FavoriteDocument) => {
+    const opened = await openFile({
+      root: document.root,
+      path: document.path,
+      name: document.name,
+      kind: "markdown",
+    });
+
+    if (!opened) {
+      setFavoriteDocuments((current) => {
+        const nextDocuments = current.filter((item) => item.path !== document.path);
+        writeFavoriteDocuments(document.root, nextDocuments);
         return nextDocuments;
       });
     }
@@ -592,6 +647,25 @@ function App() {
       writeRecentEditedDocuments(workspace.root, renamedRecentDocuments);
       setRecentEditedDocuments(renamedRecentDocuments);
 
+      const renamedFavorites = readFavoriteDocuments(workspace.root).map((document) => {
+        const affected = node.isDir
+          ? isPathInsideDirectory(document.path, node.path)
+          : document.path === node.path;
+        if (!affected) return document;
+
+        const nextPath = node.isDir
+          ? replaceDirectoryPath(document.path, node.path, renamedPath)
+          : renamedPath;
+        return {
+          ...document,
+          path: nextPath,
+          name: pathFileName(nextPath),
+          relativePath: workspaceRelativePath(workspace.root, nextPath, pathFileName(nextPath)),
+        };
+      });
+      writeFavoriteDocuments(workspace.root, renamedFavorites);
+      setFavoriteDocuments(renamedFavorites);
+
       const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
       setWorkspace(tree);
       setRenamingPath(null);
@@ -630,6 +704,14 @@ function App() {
       ));
       writeRecentEditedDocuments(workspace.root, remainingRecentDocuments);
       setRecentEditedDocuments(remainingRecentDocuments);
+
+      const remainingFavorites = readFavoriteDocuments(workspace.root).filter((document) => (
+        node.isDir
+          ? !isPathInsideDirectory(document.path, node.path)
+          : document.path !== node.path
+      ));
+      writeFavoriteDocuments(workspace.root, remainingFavorites);
+      setFavoriteDocuments(remainingFavorites);
 
       if (deletesCurrentFile) {
         activeFileRef.current = null;
@@ -720,6 +802,8 @@ function App() {
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
   const documentViewActivePath = workspaceView === "document" ? activeFile?.path ?? null : null;
+  const activeFileFavorited = activeFile?.kind === "markdown"
+    && favoriteDocuments.some((document) => document.path === activeFile.path);
 
   return (
     <main
@@ -751,12 +835,21 @@ function App() {
               <div className="section-heading">快捷访问</div>
               <button
                 className={`tree-row quick-access-row ${workspaceView === "recent" ? "active" : ""}`}
-                onClick={() => void showRecentEditedDocuments()}
+                onClick={() => void showQuickAccessView("recent")}
                 aria-current={workspaceView === "recent" ? "page" : undefined}
               >
                 <Clock3 size={15} />
                 <span>最近编辑</span>
                 {recentEditedDocuments.length > 0 && <span className="tree-count">{recentEditedDocuments.length}</span>}
+              </button>
+              <button
+                className={`tree-row quick-access-row ${workspaceView === "favorites" ? "active" : ""}`}
+                onClick={() => void showQuickAccessView("favorites")}
+                aria-current={workspaceView === "favorites" ? "page" : undefined}
+              >
+                <Star size={15} />
+                <span>我的收藏</span>
+                {favoriteDocuments.length > 0 && <span className="tree-count">{favoriteDocuments.length}</span>}
               </button>
             </div>
           )}
@@ -920,9 +1013,15 @@ function App() {
             </button>
             <img className="toolbar-logo" src="/superwiki-logo.png" alt="" />
             <div className="document-heading">
-              <h1>{workspaceView === "recent" ? "最近编辑" : activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
-              {workspaceView === "recent" ? (
-                <div className="document-meta">最近成功编辑的 Markdown 文档</div>
+              <h1>{workspaceView === "recent"
+                ? "最近编辑"
+                : workspaceView === "favorites"
+                  ? "我的收藏"
+                  : activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
+              {workspaceView !== "document" ? (
+                <div className="document-meta">
+                  {workspaceView === "recent" ? "最近成功编辑的 Markdown 文档" : "收藏的 Markdown 文档"}
+                </div>
               ) : activeFile && activeRelativePath && (
                 <div className="document-meta">
                   <span className="document-path" title={activeRelativePath}>{activeRelativePath}</span>
@@ -935,8 +1034,17 @@ function App() {
             </div>
           </div>
 
-          {workspaceView === "document" && activeFile?.kind === "markdown" && (
+        {workspaceView === "document" && activeFile?.kind === "markdown" && (
             <div className="toolbar-actions">
+              <button
+                className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
+                onClick={toggleActiveFileFavorite}
+                title={activeFileFavorited ? "取消收藏" : "收藏文档"}
+                aria-label={activeFileFavorited ? "取消收藏" : "收藏文档"}
+                aria-pressed={activeFileFavorited}
+              >
+                <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
+              </button>
               <div className="view-switcher" aria-label="视图模式">
                 <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
                 <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
@@ -1011,6 +1119,41 @@ function App() {
                 <Clock3 size={28} />
                 <strong>暂无最近编辑</strong>
                 <p>修改并成功保存 Markdown 文档后，它会显示在这里。</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {workspaceView === "favorites" && workspace && !workspaceLoading && (
+          <section className="recent-edited-view" aria-label="我的收藏">
+            <div className="recent-edited-header">
+              <div>
+                <h2>我的收藏</h2>
+                <p>收藏的 Markdown 文档</p>
+              </div>
+              <span className="recent-edited-count">{favoriteDocuments.length} 个文档</span>
+            </div>
+            {favoriteDocuments.length > 0 ? (
+              <div className="recent-edited-list">
+                {favoriteDocuments.map((document) => (
+                  <button
+                    key={`${document.root}:${document.path}`}
+                    className="recent-edited-item"
+                    onClick={() => void openFavoriteDocument(document)}
+                  >
+                    <Star size={18} fill="currentColor" />
+                    <span className="recent-edited-item-main">
+                      <strong>{document.name}</strong>
+                      <small>{document.relativePath}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="recent-edited-empty">
+                <Star size={28} />
+                <strong>暂无收藏</strong>
+                <p>打开 Markdown 文档后，点击顶部星标即可收藏。</p>
               </div>
             )}
           </section>
@@ -1505,6 +1648,52 @@ function cleanHeadingText(text: string) {
   return cleaned || "未命名标题";
 }
 
+function readFavoriteStorage(): FavoriteStorage {
+  try {
+    const stored = localStorage.getItem(FAVORITE_STORAGE_KEY);
+    if (!stored) return {};
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as FavoriteStorage;
+  } catch {
+    return {};
+  }
+}
+
+function readFavoriteDocuments(root: string) {
+  const documents = readFavoriteStorage()[root];
+  if (!Array.isArray(documents)) return [];
+
+  return documents.filter((document): document is FavoriteDocument => (
+    document !== null
+    && typeof document === "object"
+    && document.root === root
+    && typeof document.path === "string"
+    && typeof document.name === "string"
+    && typeof document.relativePath === "string"
+    && typeof document.favoritedAt === "number"
+    && Number.isFinite(document.favoritedAt)
+  ));
+}
+
+function writeFavoriteDocuments(root: string, documents: FavoriteDocument[]) {
+  try {
+    const storage = readFavoriteStorage();
+    if (documents.length > 0) storage[root] = documents;
+    else delete storage[root];
+    localStorage.setItem(FAVORITE_STORAGE_KEY, JSON.stringify(storage));
+  } catch {
+    // 收藏是辅助状态，写入失败不能影响文档编辑。
+  }
+}
+
+function filterExistingFavoriteDocuments(tree: WorkspaceTree, documents: FavoriteDocument[]) {
+  const markdownPaths = collectWorkspaceMarkdownPaths(tree);
+  return documents
+    .filter((document) => markdownPaths.has(document.path))
+    .sort((left, right) => right.favoritedAt - left.favoritedAt);
+}
+
 function readRecentEditedStorage(): RecentEditedStorage {
   try {
     const stored = localStorage.getItem(RECENT_EDITED_STORAGE_KEY);
@@ -1544,7 +1733,7 @@ function writeRecentEditedDocuments(root: string, documents: RecentEditedDocumen
   }
 }
 
-function filterExistingRecentDocuments(tree: WorkspaceTree, documents: RecentEditedDocument[]) {
+function collectWorkspaceMarkdownPaths(tree: WorkspaceTree) {
   const markdownPaths = new Set<string>();
   const collectMarkdownPaths = (nodes: FileTreeNode[]) => {
     for (const node of nodes) {
@@ -1553,7 +1742,11 @@ function filterExistingRecentDocuments(tree: WorkspaceTree, documents: RecentEdi
     }
   };
   collectMarkdownPaths(tree.children);
+  return markdownPaths;
+}
 
+function filterExistingRecentDocuments(tree: WorkspaceTree, documents: RecentEditedDocument[]) {
+  const markdownPaths = collectWorkspaceMarkdownPaths(tree);
   return documents
     .filter((document) => markdownPaths.has(document.path))
     .sort((left, right) => right.editedAt - left.editedAt)

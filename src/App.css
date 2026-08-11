@@ -1048,3 +1048,9 @@ button.folder-placeholder:hover {
   color: var(--ui-muted);
   font-size: 11px;
 }
+
+.favorite-toggle.active,
+.favorite-toggle.active:hover {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
