@@ -5,6 +5,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ChevronRight,
+  Clock3,
   Copy,
   File,
   FileCode2,
@@ -52,6 +53,7 @@ type ActiveFile = {
 };
 
 type ViewMode = "editor" | "preview";
+type WorkspaceView = "document" | "recent";
 type SaveState = "saved" | "saving" | "error";
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
 
@@ -74,7 +76,19 @@ type CreatingEntry = {
   kind: CreateEntryKind;
 };
 
+type RecentEditedDocument = {
+  root: string;
+  path: string;
+  name: string;
+  relativePath: string;
+  editedAt: number;
+};
+
+type RecentEditedStorage = Record<string, RecentEditedDocument[]>;
+
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
+const RECENT_EDITED_STORAGE_KEY = "superwiki.recentEditedDocuments";
+const MAX_RECENT_EDITED_DOCUMENTS = 20;
 const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
 const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
@@ -101,6 +115,8 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("document");
+  const [recentEditedDocuments, setRecentEditedDocuments] = useState<RecentEditedDocument[]>([]);
   const [content, setContent] = useState("");
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -156,6 +172,25 @@ function App() {
     return latestMarkdown;
   }, []);
 
+  const recordRecentEdit = useCallback((file: ActiveFile) => {
+    if (file.kind !== "markdown") return;
+
+    const document: RecentEditedDocument = {
+      root: file.root,
+      path: file.path,
+      name: file.name,
+      relativePath: workspaceRelativePath(file.root, file.path, file.name),
+      editedAt: Date.now(),
+    };
+    const nextDocuments = [
+      document,
+      ...readRecentEditedDocuments(file.root).filter((item) => item.path !== file.path),
+    ].slice(0, MAX_RECENT_EDITED_DOCUMENTS);
+
+    writeRecentEditedDocuments(file.root, nextDocuments);
+    setRecentEditedDocuments(nextDocuments);
+  }, []);
+
   const flushPendingSave = useCallback(async () => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
@@ -174,7 +209,8 @@ function App() {
       content: latestContent,
     });
     loadedContent.current = latestContent;
-  }, [syncEditorContent]);
+    recordRecentEdit(file);
+  }, [recordRecentEdit, syncEditorContent]);
 
   const openFile = useCallback(async (file: ActiveFile) => {
     try {
@@ -218,8 +254,11 @@ function App() {
 
       activeFileRef.current = file;
       setActiveFile(file);
+      setWorkspaceView("document");
+      return true;
     } catch (reason) {
       setError(String(reason));
+      return false;
     }
   }, [flushPendingSave, replaceImageUrl]);
 
@@ -228,10 +267,14 @@ function App() {
     try {
       setError("");
       const tree = await invoke<WorkspaceTree>("list_workspace", { root });
+      const recentDocuments = filterExistingRecentDocuments(tree, readRecentEditedDocuments(tree.root));
       setWorkspace(tree);
+      setRecentEditedDocuments(recentDocuments);
+      writeRecentEditedDocuments(tree.root, recentDocuments);
       if (remember) localStorage.setItem(WORKSPACE_STORAGE_KEY, tree.root);
     } catch (reason) {
       setWorkspace(null);
+      setRecentEditedDocuments([]);
       localStorage.removeItem(WORKSPACE_STORAGE_KEY);
       setError(`无法打开文件夹：${String(reason)}`);
     } finally {
@@ -249,6 +292,7 @@ function App() {
       setDirectoryContextMenu(null);
       setCreatingEntry(null);
       setRenamingPath(null);
+      setWorkspaceView("document");
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -307,6 +351,7 @@ function App() {
           content,
         });
         loadedContent.current = content;
+        recordRecentEdit(activeFile);
         saveTimerRef.current = null;
         setSaveState("saved");
       } catch (reason) {
@@ -319,7 +364,7 @@ function App() {
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
-  }, [activeFile, content]);
+  }, [activeFile, content, recordRecentEdit]);
 
   const closeWorkspace = async () => {
     try {
@@ -328,6 +373,8 @@ function App() {
       setDirectoryContextMenu(null);
       setCreatingEntry(null);
       setRenamingPath(null);
+      setWorkspaceView("document");
+      setRecentEditedDocuments([]);
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -369,6 +416,36 @@ function App() {
       kind: file.isImage ? "image" : file.isOffice ? "office" : "markdown",
     });
   }, [openFile, workspace]);
+
+  const showRecentEditedDocuments = useCallback(async () => {
+    if (!workspace) return;
+
+    try {
+      setError("");
+      await flushPendingSave();
+      setSaveState("saved");
+      setWorkspaceView("recent");
+    } catch (reason) {
+      setError(`无法打开最近编辑：${String(reason)}`);
+    }
+  }, [flushPendingSave, workspace]);
+
+  const openRecentEditedDocument = useCallback(async (document: RecentEditedDocument) => {
+    const opened = await openFile({
+      root: document.root,
+      path: document.path,
+      name: document.name,
+      kind: "markdown",
+    });
+
+    if (!opened) {
+      setRecentEditedDocuments((current) => {
+        const nextDocuments = current.filter((item) => item.path !== document.path);
+        writeRecentEditedDocuments(document.root, nextDocuments);
+        return nextDocuments;
+      });
+    }
+  }, [openFile]);
 
   const openDirectoryContextMenu = useCallback((
     event: React.MouseEvent,
@@ -496,6 +573,25 @@ function App() {
         setActiveFile(updatedFile);
       }
 
+      const renamedRecentDocuments = readRecentEditedDocuments(workspace.root).map((document) => {
+        const affected = node.isDir
+          ? isPathInsideDirectory(document.path, node.path)
+          : document.path === node.path;
+        if (!affected) return document;
+
+        const nextPath = node.isDir
+          ? replaceDirectoryPath(document.path, node.path, renamedPath)
+          : renamedPath;
+        return {
+          ...document,
+          path: nextPath,
+          name: pathFileName(nextPath),
+          relativePath: workspaceRelativePath(workspace.root, nextPath, pathFileName(nextPath)),
+        };
+      });
+      writeRecentEditedDocuments(workspace.root, renamedRecentDocuments);
+      setRecentEditedDocuments(renamedRecentDocuments);
+
       const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
       setWorkspace(tree);
       setRenamingPath(null);
@@ -527,6 +623,14 @@ function App() {
         path: node.path,
       });
 
+      const remainingRecentDocuments = readRecentEditedDocuments(workspace.root).filter((document) => (
+        node.isDir
+          ? !isPathInsideDirectory(document.path, node.path)
+          : document.path !== node.path
+      ));
+      writeRecentEditedDocuments(workspace.root, remainingRecentDocuments);
+      setRecentEditedDocuments(remainingRecentDocuments);
+
       if (deletesCurrentFile) {
         activeFileRef.current = null;
         editorMarkdownRef.current = null;
@@ -537,6 +641,7 @@ function App() {
         replaceImageUrl(null);
         setOfficeData(null);
         setSaveState("saved");
+        setWorkspaceView("document");
       }
 
       setCreatingEntry(null);
@@ -614,6 +719,7 @@ function App() {
   const activeRelativePath = activeFile
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
+  const documentViewActivePath = workspaceView === "document" ? activeFile?.path ?? null : null;
 
   return (
     <main
@@ -640,6 +746,21 @@ function App() {
         </button>
 
         <div className="sidebar-content folder-only">
+          {workspace && (
+            <div className="quick-access-section">
+              <div className="section-heading">快捷访问</div>
+              <button
+                className={`tree-row quick-access-row ${workspaceView === "recent" ? "active" : ""}`}
+                onClick={() => void showRecentEditedDocuments()}
+                aria-current={workspaceView === "recent" ? "page" : undefined}
+              >
+                <Clock3 size={15} />
+                <span>最近编辑</span>
+                {recentEditedDocuments.length > 0 && <span className="tree-count">{recentEditedDocuments.length}</span>}
+              </button>
+            </div>
+          )}
+
           <div className="section-heading">
             <span>本地目录</span>
             {workspace && (
@@ -687,7 +808,7 @@ function App() {
                   key={node.path}
                   node={node}
                   depth={0}
-                  activePath={activeFile?.path ?? null}
+                  activePath={documentViewActivePath}
                   renamingPath={renamingPath}
                   creatingEntry={creatingEntry}
                   onOpen={openTreeFile}
@@ -799,8 +920,10 @@ function App() {
             </button>
             <img className="toolbar-logo" src="/superwiki-logo.png" alt="" />
             <div className="document-heading">
-              <h1>{activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
-              {activeFile && activeRelativePath && (
+              <h1>{workspaceView === "recent" ? "最近编辑" : activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
+              {workspaceView === "recent" ? (
+                <div className="document-meta">最近成功编辑的 Markdown 文档</div>
+              ) : activeFile && activeRelativePath && (
                 <div className="document-meta">
                   <span className="document-path" title={activeRelativePath}>{activeRelativePath}</span>
                   <span className="meta-separator">·</span>
@@ -812,7 +935,7 @@ function App() {
             </div>
           </div>
 
-          {activeFile?.kind === "markdown" && (
+          {workspaceView === "document" && activeFile?.kind === "markdown" && (
             <div className="toolbar-actions">
               <div className="view-switcher" aria-label="视图模式">
                 <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
@@ -847,7 +970,7 @@ function App() {
           <EmptyState icon={<Folder size={32} />} title="正在读取文件夹" description="请稍候…" />
         )}
 
-        {workspace && !activeFile && !workspaceLoading && (
+        {workspace && workspaceView === "document" && !activeFile && !workspaceLoading && (
           <EmptyState
             icon={<FileCode2 size={32} />}
             title="选择一个 Markdown 或图片文件"
@@ -855,7 +978,45 @@ function App() {
           />
         )}
 
-        {activeFile?.kind === "markdown" && (
+        {workspaceView === "recent" && workspace && !workspaceLoading && (
+          <section className="recent-edited-view" aria-label="最近编辑">
+            <div className="recent-edited-header">
+              <div>
+                <h2>最近编辑</h2>
+                <p>最近成功编辑过的 Markdown 文档</p>
+              </div>
+              <span className="recent-edited-count">{recentEditedDocuments.length} 个文档</span>
+            </div>
+            {recentEditedDocuments.length > 0 ? (
+              <div className="recent-edited-list">
+                {recentEditedDocuments.map((document) => (
+                  <button
+                    key={`${document.root}:${document.path}`}
+                    className="recent-edited-item"
+                    onClick={() => void openRecentEditedDocument(document)}
+                  >
+                    <FileCode2 size={18} />
+                    <span className="recent-edited-item-main">
+                      <strong>{document.name}</strong>
+                      <small>{document.relativePath}</small>
+                    </span>
+                    <time dateTime={new Date(document.editedAt).toISOString()}>
+                      {formatRecentEditedTime(document.editedAt)}
+                    </time>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="recent-edited-empty">
+                <Clock3 size={28} />
+                <strong>暂无最近编辑</strong>
+                <p>修改并成功保存 Markdown 文档后，它会显示在这里。</p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {workspaceView === "document" && activeFile?.kind === "markdown" && (
           <div className={`editor-layout mode-${viewMode} ${outlineOpen ? "" : "outline-hidden"}`}>
             {viewMode !== "preview" && (
               <section ref={editorPaneRef} className="editor-pane" aria-label="Markdown 所见即所得编辑器">
@@ -891,7 +1052,7 @@ function App() {
           </div>
         )}
 
-        {activeFile?.kind === "image" && imageUrl && (
+        {workspaceView === "document" && activeFile?.kind === "image" && imageUrl && (
           <section className="image-preview" aria-label="图片预览">
             <div className="image-preview-canvas">
               <img src={imageUrl} alt={activeFile.name} />
@@ -899,7 +1060,7 @@ function App() {
           </section>
         )}
 
-        {activeFile?.kind === "office" && officeData && (
+        {workspaceView === "document" && activeFile?.kind === "office" && officeData && (
           <Suspense fallback={<div className="editor-loading">正在加载 Office 预览器…</div>}>
             <OfficePreview data={officeData} name={activeFile.name} />
           </Suspense>
@@ -1342,6 +1503,84 @@ function cleanHeadingText(text: string) {
     .replace(/\\([\\`*{}\[\]()#+\-.!_>])/g, "$1")
     .trim();
   return cleaned || "未命名标题";
+}
+
+function readRecentEditedStorage(): RecentEditedStorage {
+  try {
+    const stored = localStorage.getItem(RECENT_EDITED_STORAGE_KEY);
+    if (!stored) return {};
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as RecentEditedStorage;
+  } catch {
+    return {};
+  }
+}
+
+function readRecentEditedDocuments(root: string) {
+  const documents = readRecentEditedStorage()[root];
+  if (!Array.isArray(documents)) return [];
+
+  return documents.filter((document): document is RecentEditedDocument => (
+    document !== null
+    && typeof document === "object"
+    && document.root === root
+    && typeof document.path === "string"
+    && typeof document.name === "string"
+    && typeof document.relativePath === "string"
+    && typeof document.editedAt === "number"
+    && Number.isFinite(document.editedAt)
+  ));
+}
+
+function writeRecentEditedDocuments(root: string, documents: RecentEditedDocument[]) {
+  try {
+    const storage = readRecentEditedStorage();
+    if (documents.length > 0) storage[root] = documents;
+    else delete storage[root];
+    localStorage.setItem(RECENT_EDITED_STORAGE_KEY, JSON.stringify(storage));
+  } catch {
+    // 最近编辑是辅助状态，写入失败不能影响文档保存。
+  }
+}
+
+function filterExistingRecentDocuments(tree: WorkspaceTree, documents: RecentEditedDocument[]) {
+  const markdownPaths = new Set<string>();
+  const collectMarkdownPaths = (nodes: FileTreeNode[]) => {
+    for (const node of nodes) {
+      if (node.isDir) collectMarkdownPaths(node.children);
+      else if (node.isMarkdown) markdownPaths.add(node.path);
+    }
+  };
+  collectMarkdownPaths(tree.children);
+
+  return documents
+    .filter((document) => markdownPaths.has(document.path))
+    .sort((left, right) => right.editedAt - left.editedAt)
+    .slice(0, MAX_RECENT_EDITED_DOCUMENTS);
+}
+
+function formatRecentEditedTime(timestamp: number) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const difference = Math.max(0, now.getTime() - date.getTime());
+  const minutes = Math.floor(difference / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (isSameCalendarDay(date, now)) return `今天 ${time}`;
+
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (isSameCalendarDay(date, yesterday)) return `昨天 ${time}`;
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日`;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function isSameCalendarDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
 }
 
 function pathFileName(path: string) {
