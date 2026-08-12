@@ -12,6 +12,7 @@ import { topBar } from "@milkdown/crepe/feature/top-bar";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
 import { htmlEmbed } from "./htmlEmbed";
+import { videoEmbed } from "./videoEmbed";
 import { isMermaidLanguage, mermaidErrorMessage, renderMermaid } from "./mermaidRenderer";
 import { isPlantUmlLanguage, plantUmlErrorMessage, renderPlantUml } from "./plantumlRenderer";
 import { proxyWorkspaceImage, uploadWorkspaceImage } from "./workspaceImages";
@@ -132,6 +133,7 @@ function WysiwygEditorInner({
         proxyHtml: (source) => proxyWorkspaceHtml(workspaceRoot, documentPath, source, htmlUrlCache.current),
         onAssetUploaded: () => onAssetUploadedRef.current(),
       })
+      .addFeature(videoEmbed)
       .addFeature(listItem)
       .addFeature(linkTooltip)
       .addFeature(placeholder, {

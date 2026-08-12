@@ -27,7 +27,9 @@ import remarkGfm from "remark-gfm";
 import MermaidDiagram from "./MermaidDiagram";
 import { isMermaidLanguage } from "./mermaidRenderer";
 import PlantUmlDiagram from "./PlantUmlDiagram";
+import VideoEmbedPreview from "./VideoEmbedPreview";
 import { isPlantUmlLanguage } from "./plantumlRenderer";
+import { remarkVideoEmbed } from "./remarkVideoEmbed";
 import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
 import "./App.css";
 
@@ -1593,7 +1595,7 @@ type MarkdownPreviewProps = {
 const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, documentPath }: MarkdownPreviewProps) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[remarkGfm, remarkVideoEmbed]}
       components={{
         code: ({ className, children, ...props }) => {
           const language = /(?:^|\s)language-([^\s]+)/.exec(className ?? "")?.[1];
@@ -1611,6 +1613,20 @@ const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, 
             documentPath={documentPath}
           />
         ),
+        div: ({ node, children, ...props }) => {
+          const videoUrl = node?.properties?.["data-video-url"];
+          const isVideo = node?.properties?.["data-video-embed"] === "true";
+          const videoLabel = node?.properties?.["data-video-label"];
+          if (isVideo && typeof videoUrl === "string") {
+            return (
+              <VideoEmbedPreview
+                url={videoUrl}
+                label={typeof videoLabel === "string" ? videoLabel : undefined}
+              />
+            );
+          }
+          return <div {...props}>{children}</div>;
+        },
       }}
     >
       {content}
