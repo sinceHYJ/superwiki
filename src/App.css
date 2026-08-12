@@ -684,7 +684,7 @@ button.folder-placeholder:hover {
 
 .sidebar-footer {
   display: block;
-  min-height: 73px;
+  min-height: 52px;
   padding: 8px 10px 10px;
   color: var(--ui-muted);
   border-color: var(--ui-border);
