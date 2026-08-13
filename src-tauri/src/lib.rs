@@ -33,6 +33,70 @@ struct AssetUploadMetadata {
     file_name: String,
 }
 
+#[derive(Deserialize)]
+struct BilibiliViewResponse {
+    code: i32,
+    data: Option<BilibiliVideoData>,
+}
+
+#[derive(Deserialize)]
+struct BilibiliVideoData {
+    pic: Option<String>,
+}
+
+#[tauri::command]
+async fn fetch_bilibili_thumbnail(bvid: String) -> Result<tauri::ipc::Response, String> {
+    if !bvid.starts_with("BV")
+        || bvid.len() != 12
+        || !bvid
+            .chars()
+            .skip(2)
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return Err("Bilibili 视频编号无效".into());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("SuperWiki/0.5.0")
+        .build()
+        .map_err(|error| format!("无法创建网络客户端：{error}"))?;
+    let metadata_url = format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
+    let metadata = client
+        .get(metadata_url)
+        .header(reqwest::header::REFERER, "https://www.bilibili.com/")
+        .send()
+        .await
+        .map_err(|error| format!("无法请求 Bilibili 视频信息：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Bilibili 视频信息请求失败：{error}"))?
+        .json::<BilibiliViewResponse>()
+        .await
+        .map_err(|error| format!("无法解析 Bilibili 视频信息：{error}"))?;
+
+    if metadata.code != 0 {
+        return Err(format!("Bilibili 返回错误码：{}", metadata.code));
+    }
+    let source = metadata
+        .data
+        .and_then(|data| data.pic)
+        .ok_or_else(|| "Bilibili 未返回视频封面".to_string())?
+        .replace("http://", "https://");
+
+    let image = client
+        .get(source)
+        .header(reqwest::header::REFERER, "https://www.bilibili.com/")
+        .send()
+        .await
+        .map_err(|error| format!("无法下载 Bilibili 视频封面：{error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Bilibili 视频封面下载失败：{error}"))?
+        .bytes()
+        .await
+        .map_err(|error| format!("无法读取 Bilibili 视频封面：{error}"))?;
+
+    Ok(tauri::ipc::Response::new(image.to_vec()))
+}
+
 fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -592,6 +656,7 @@ pub fn run() {
             read_workspace_image,
             read_workspace_html,
             read_workspace_office,
+            fetch_bilibili_thumbnail,
             upload_workspace_image,
             upload_workspace_html
         ])

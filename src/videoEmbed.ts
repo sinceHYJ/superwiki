@@ -2,6 +2,7 @@ import type { Editor } from "@milkdown/kit/core";
 import type { Node as MarkdownNode } from "@milkdown/kit/transformer";
 import { Plugin } from "@milkdown/kit/prose/state";
 import { $nodeSchema, $prose, $remark, $view } from "@milkdown/kit/utils";
+import { releaseVideoThumbnailUrls, resolveVideoThumbnailUrls } from "./videoThumbnail";
 import { parseVideoUrl } from "./videoUrl";
 
 const VIDEO_EMBED_NODE = "video-embed";
@@ -145,6 +146,7 @@ const videoEmbedView = $view(videoEmbedSchema.node, () => (node) => {
   const dom = document.createElement("div");
   const stage = document.createElement("div");
   let currentUrl = "";
+  let thumbnailUrls: string[] = [];
 
   dom.className = "video-embed-card";
   dom.dataset.type = VIDEO_EMBED_NODE;
@@ -162,11 +164,16 @@ const videoEmbedView = $view(videoEmbedSchema.node, () => (node) => {
     dom.dataset.videoId = video.videoId;
     dom.dataset.url = url;
     dom.dataset.label = label;
+    releaseVideoThumbnailUrls(thumbnailUrls);
+    thumbnailUrls = [];
     stage.replaceChildren();
 
+    const thumbnail = document.createElement("img");
     const play = document.createElement("button");
     const icon = document.createElement("span");
     const text = document.createElement("span");
+    thumbnail.className = "video-embed-thumbnail";
+    thumbnail.alt = "";
     play.className = "video-embed-play";
     play.type = "button";
     icon.className = "video-embed-play-icon";
@@ -174,6 +181,18 @@ const videoEmbedView = $view(videoEmbedSchema.node, () => (node) => {
     icon.setAttribute("aria-hidden", "true");
     text.textContent = "点击加载并播放外部视频";
     play.append(icon, text);
+    thumbnail.addEventListener("error", () => {
+      thumbnail.remove();
+    });
+    void resolveVideoThumbnailUrls(video).then((urls) => {
+      if (currentUrl !== url || !urls[0] || stage.querySelector("iframe")) {
+        releaseVideoThumbnailUrls(urls);
+        return;
+      }
+      thumbnailUrls = urls;
+      thumbnail.src = urls[0];
+      stage.append(thumbnail);
+    });
     play.addEventListener("click", () => {
       if (currentUrl !== url) return;
       const iframe = document.createElement("iframe");
@@ -204,6 +223,7 @@ const videoEmbedView = $view(videoEmbedSchema.node, () => (node) => {
       render(updatedNode.attrs.url, updatedNode.attrs.label);
       return true;
     },
+    destroy: () => releaseVideoThumbnailUrls(thumbnailUrls),
   };
 });
 
