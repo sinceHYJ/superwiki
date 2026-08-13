@@ -25,3 +25,4 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-clipboard-manager = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+anydoc = "0.1.8"

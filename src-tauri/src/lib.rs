@@ -15,6 +15,7 @@ struct FileTreeNode {
     is_markdown: bool,
     is_image: bool,
     is_office: bool,
+    is_convertible: bool,
     children: Vec<FileTreeNode>,
 }
 
@@ -135,6 +136,37 @@ fn is_office(path: &Path) -> bool {
         })
 }
 
+fn is_convertible(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "doc"
+                    | "docx"
+                    | "docm"
+                    | "ppt"
+                    | "pps"
+                    | "pot"
+                    | "pptx"
+                    | "pptm"
+                    | "ppsx"
+                    | "ppsm"
+                    | "xls"
+                    | "xlsx"
+                    | "xlsm"
+                    | "xlsb"
+                    | "odt"
+                    | "ods"
+                    | "odp"
+                    | "rtf"
+                    | "epub"
+                    | "csv"
+                    | "pdf"
+            )
+        })
+}
+
 fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
     let mut nodes = Vec::new();
     let entries = fs::read_dir(path).map_err(|error| error.to_string())?;
@@ -157,6 +189,7 @@ fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
             is_markdown: !is_dir && is_markdown(&entry_path),
             is_image: !is_dir && is_image(&entry_path),
             is_office: !is_dir && is_office(&entry_path),
+            is_convertible: !is_dir && is_convertible(&entry_path),
             children,
         });
     }
@@ -626,6 +659,48 @@ fn open_workspace_entry_in_file_manager(
 }
 
 #[tauri::command]
+fn convert_workspace_file(root: String, path: String) -> Result<String, String> {
+    let source = workspace_file_path(&root, &path)?;
+    if !is_convertible(&source) {
+        return Err("该文件格式不支持转换为 Markdown".into());
+    }
+
+    let parent = source
+        .parent()
+        .ok_or_else(|| "无法确定源文件所在目录".to_string())?;
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "源文件名无效".to_string())?;
+    let destination = parent.join(format!("{stem}.md"));
+    if destination.exists() {
+        return Err(format!("目标文件已存在：{}", destination.display()));
+    }
+
+    let markdown =
+        anydoc::to_markdown(&source).map_err(|error| format!("无法转换文件：{error}"))?;
+    if markdown.trim().is_empty() {
+        return Err("转换结果为空，未创建 Markdown 文件".into());
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+        .map_err(|error| {
+            if error.kind() == ErrorKind::AlreadyExists {
+                format!("目标文件已存在：{}", destination.display())
+            } else {
+                format!("无法创建 Markdown 文件：{error}")
+            }
+        })?;
+    output
+        .write_all(markdown.as_bytes())
+        .map_err(|error| format!("无法写入 Markdown 文件：{error}"))?;
+    Ok(destination.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Response, String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_office(&path) {
@@ -656,6 +731,7 @@ pub fn run() {
             read_workspace_image,
             read_workspace_html,
             read_workspace_office,
+            convert_workspace_file,
             fetch_bilibili_thumbnail,
             upload_workspace_image,
             upload_workspace_html
@@ -686,6 +762,12 @@ mod tests {
         assert!(is_office(Path::new("slides.pptx")));
         assert!(!is_office(Path::new("legacy.doc")));
         assert!(!is_office(Path::new("document.pdf")));
+        for extension in [
+            "doc", "docx", "docm", "ppt", "pps", "pot", "pptx", "pptm", "ppsx", "ppsm", "xls",
+            "xlsx", "xlsm", "xlsb", "odt", "ods", "odp", "rtf", "epub", "csv", "pdf",
+        ] {
+            assert!(is_convertible(Path::new(&format!("input.{extension}"))));
+        }
     }
 
     #[test]
@@ -710,6 +792,28 @@ mod tests {
             read_workspace_office(root_string, unsupported.to_string_lossy().into_owned(),)
                 .is_err()
         );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn converts_csv_to_markdown_without_overwriting_existing_markdown() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("superwiki-convert-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        let csv = root.join("report.csv");
+        fs::write(&csv, "Name,Score\nAlice,100\n").unwrap();
+
+        let root_string = root.to_string_lossy().into_owned();
+        let markdown_path =
+            convert_workspace_file(root_string.clone(), csv.to_string_lossy().into_owned())
+                .unwrap();
+        let markdown = fs::read_to_string(&markdown_path).unwrap();
+        assert!(markdown.contains("| Name | Score |"));
+        assert!(convert_workspace_file(root_string, csv.to_string_lossy().into_owned()).is_err());
 
         fs::remove_dir_all(root).unwrap();
     }

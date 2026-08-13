@@ -41,6 +41,7 @@ type FileTreeNode = {
   isMarkdown: boolean;
   isImage: boolean;
   isOffice: boolean;
+  isConvertible: boolean;
   children: FileTreeNode[];
 };
 
@@ -532,13 +533,41 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     setCreatingEntry(null);
+    const menuHeight = node.isDir
+      ? (isWorkspaceRoot ? 136 : 196)
+      : (node.isConvertible ? 166 : 136);
     setDirectoryContextMenu({
       node,
       isWorkspaceRoot,
       x: Math.min(event.clientX, window.innerWidth - 170),
-      y: Math.min(event.clientY, window.innerHeight - (node.isDir && !isWorkspaceRoot ? 196 : 136)),
+      y: Math.min(event.clientY, window.innerHeight - menuHeight),
     });
   }, []);
+
+  const convertTreeFile = useCallback(async (node: FileTreeNode) => {
+    if (!workspace || node.isDir || !node.isConvertible) return;
+
+    setDirectoryContextMenu(null);
+    try {
+      setError("");
+      await flushPendingSave();
+      setSaveState("saved");
+      const markdownPath = await invoke<string>("convert_workspace_file", {
+        root: workspace.root,
+        path: node.path,
+      });
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
+      setWorkspace(tree);
+      await openFile({
+        root: workspace.root,
+        path: markdownPath,
+        name: pathFileName(markdownPath),
+        kind: "markdown",
+      });
+    } catch (reason) {
+      setError(`无法转换为 Markdown：${String(reason)}`);
+    }
+  }, [flushPendingSave, openFile, workspace]);
 
   const copyAbsolutePath = useCallback(async (node: FileTreeNode) => {
     setDirectoryContextMenu(null);
@@ -967,6 +996,7 @@ function App() {
                   isMarkdown: false,
                   isImage: false,
                   isOffice: false,
+                  isConvertible: false,
                   children: workspace.children,
                 }, true)}
               >
@@ -1031,6 +1061,11 @@ function App() {
                   <Folder size={13} />新建文件夹
                 </button>
               </>
+            )}
+            {directoryContextMenu.node.isConvertible && (
+              <button onClick={() => void convertTreeFile(directoryContextMenu.node)}>
+                <FileCode2 size={13} />转换为 Markdown
+              </button>
             )}
             <button onClick={() => void openInFileManager(directoryContextMenu.node)}>
               <FolderOpen size={13} />{OPEN_IN_FILE_MANAGER_LABEL}
@@ -1517,7 +1552,7 @@ function TreeNode({
       className={fileRowClassName}
       style={style}
       aria-disabled={!node.isMarkdown && !node.isImage && !node.isOffice}
-      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可在文件管理器中打开、重命名或删除"}
+      title={node.isMarkdown || node.isImage || node.isOffice ? node.path : node.isConvertible ? "右键可转换为 Markdown" : "当前仅支持 Markdown 编辑，以及图片、DOCX、XLSX、PPTX 预览，右键可在文件管理器中打开、重命名或删除"}
       onClick={() => {
         if (node.isMarkdown || node.isImage || node.isOffice) onOpen(node);
       }}
