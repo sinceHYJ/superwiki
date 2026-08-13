@@ -473,7 +473,7 @@ body {
   position: absolute;
   top: 50%;
   left: 12px;
-  color: var(--ui-muted);
+  color: var(--ui-text);
   pointer-events: none;
   transform: translateY(-50%);
 }
@@ -560,14 +560,14 @@ body {
 .section-heading {
   min-height: 31px;
   padding: 6px 9px 5px;
-  color: var(--ui-muted);
+  color: #5b5f56;
   font-size: 10px;
   font-weight: 650;
   letter-spacing: .1em;
 }
 
 .section-actions button {
-  color: var(--ui-muted);
+  color: var(--ui-text);
 }
 
 .section-actions button:hover {
@@ -576,7 +576,7 @@ body {
 }
 
 .folder-placeholder {
-  color: var(--ui-muted);
+  color: var(--ui-text);
   background: rgba(255, 255, 255, .55);
   border-color: #d8d9d2;
 }
@@ -612,7 +612,7 @@ button.folder-placeholder:hover {
   height: 34px;
   gap: 7px;
   padding-right: 8px;
-  color: var(--ui-muted);
+  color: var(--ui-text);
   border-radius: 7px;
 }
 
@@ -641,7 +641,7 @@ button.folder-placeholder:hover {
 .tree-directory .tree-chevron,
 .tree-row.file > svg,
 .tree-row.file:not(.unsupported) > svg {
-  color: var(--ui-muted);
+  color: #6b7066;
 }
 
 .tree-directory .folder-closed,
