@@ -11,6 +11,7 @@ import {
   FileCode2,
   Folder,
   Image as ImageIcon,
+  Maximize2,
   FolderOpen,
   PanelLeftClose,
   PanelRightClose,
@@ -141,6 +142,7 @@ function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [documentFullscreen, setDocumentFullscreen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -345,6 +347,20 @@ function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [directoryContextMenu]);
+
+  useEffect(() => {
+    if (!documentFullscreen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDocumentFullscreen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [documentFullscreen]);
+
+  useEffect(() => {
+    if (activeFile?.kind !== "markdown") setDocumentFullscreen(false);
+  }, [activeFile?.kind]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -768,6 +784,18 @@ function App() {
     setViewMode(mode);
   };
 
+  const enterDocumentFullscreen = async () => {
+    try {
+      setError("");
+      await flushPendingSave();
+      setSaveState("saved");
+      setDocumentFullscreen(true);
+    } catch (reason) {
+      setSaveState("error");
+      setError(String(reason));
+    }
+  };
+
   const clampSidebarWidth = useCallback((width: number) => {
     const availableWidth = Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
     return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), Math.max(MIN_SIDEBAR_WIDTH, availableWidth));
@@ -820,7 +848,7 @@ function App() {
 
   return (
     <main
-      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""}`}
+      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""}`}
       data-theme={themeColor}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
@@ -1106,6 +1134,14 @@ function App() {
                 <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
               </div>
               <button
+                className="icon-button document-fullscreen-toggle"
+                onClick={() => void enterDocumentFullscreen()}
+                title="只读全屏（Esc 退出）"
+                aria-label="只读全屏（Esc 退出）"
+              >
+                <Maximize2 size={18} />
+              </button>
+              <button
                 className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
                 onClick={() => setOutlineOpen((value) => !value)}
                 title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
@@ -1216,8 +1252,8 @@ function App() {
         )}
 
         {workspaceView === "document" && activeFile?.kind === "markdown" && (
-          <div className={`editor-layout mode-${viewMode} ${outlineOpen ? "" : "outline-hidden"}`}>
-            {viewMode !== "preview" && (
+          <div className={`editor-layout mode-${documentFullscreen ? "preview" : viewMode} ${outlineOpen ? "" : "outline-hidden"}`}>
+            {!documentFullscreen && viewMode !== "preview" && (
               <section ref={editorPaneRef} className="editor-pane" aria-label="Markdown 所见即所得编辑器">
                 <Suspense fallback={<div className="editor-loading">正在加载所见即所得编辑器…</div>}>
                   <WysiwygEditor
@@ -1234,12 +1270,12 @@ function App() {
               </section>
             )}
 
-            {viewMode !== "editor" && (
-              <section ref={previewPaneRef} className="preview-pane" aria-label="Markdown 预览">
-                <div className="pane-label">预览</div>
+            {(documentFullscreen || viewMode !== "editor") && (
+              <section ref={previewPaneRef} className="preview-pane" aria-label={documentFullscreen ? "Markdown 只读全屏" : "Markdown 预览"}>
+                {!documentFullscreen && <div className="pane-label">预览</div>}
                 <article className="markdown-body">
                   <MarkdownPreview
-                    content={previewContent}
+                    content={documentFullscreen ? content : previewContent}
                     workspaceRoot={activeFile.root}
                     documentPath={activeFile.path}
                   />
@@ -1247,7 +1283,9 @@ function App() {
               </section>
             )}
 
-            {outlineOpen && <DocumentOutline headings={documentHeadings} onSelect={scrollToHeading} />}
+            {!documentFullscreen && outlineOpen && (
+              <DocumentOutline headings={documentHeadings} onSelect={scrollToHeading} />
+            )}
           </div>
         )}
 

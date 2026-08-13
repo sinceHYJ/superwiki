@@ -1150,3 +1150,26 @@ button.folder-placeholder:hover {
 .video-embed-play-icon { display: grid; width: 58px; height: 58px; padding-left: 4px; place-items: center; color: #202219; font-size: 24px; background: var(--accent-primary); border-radius: 50%; box-shadow: 0 8px 24px rgba(0, 0, 0, .28); }
 .markdown-body .video-embed-card { max-width: 760px; }
 .wysiwyg-editor .milkdown .video-embed-card { max-width: 760px; }
+
+.app-shell.document-fullscreen {
+  grid-template-columns: 1fr;
+}
+
+.document-fullscreen .sidebar,
+.document-fullscreen .sidebar-resizer,
+.document-fullscreen .toolbar,
+.document-fullscreen .document-outline,
+.document-fullscreen .pane-label,
+.document-fullscreen .milkdown-toolbar,
+.document-fullscreen .milkdown-top-bar {
+  display: none;
+}
+
+.document-fullscreen .workspace {
+  width: 100%;
+}
+
+.document-fullscreen .editor-layout.mode-editor,
+.document-fullscreen .editor-layout.mode-preview {
+  grid-template-columns: minmax(0, 1fr);
+}
