@@ -1,10 +1,10 @@
 :root {
-  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #24251f;
   background: #f7f7f2;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+  font-synthesis: auto;
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
 }
 
 * { box-sizing: border-box; }
@@ -380,25 +380,25 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 
 /* Notes workspace redesign: visual-only overrides based on the provided demo. */
 :root {
-  color: #41443d;
-  background: #f8f8f5;
+  color: oklch(0.2852 0.0094 124.82);
+  background: oklch(0.9845 0.0026 106.45);
 }
 
 body {
-  color: #41443d;
-  background: #f8f8f5;
+  color: oklch(0.2852 0.0094 124.82);
+  background: oklch(0.9845 0.0026 106.45);
 }
 
 .app-shell {
-  --ui-surface: #fefefd;
-  --ui-sidebar: #f7f7f4;
-  --ui-canvas: #ffffff;
-  --ui-text: #41443d;
-  --ui-muted: #72766d;
-  --ui-subtle: #9a9e95;
-  --ui-border: #e7e7e1;
-  --ui-hover: #eeeeea;
-  --ui-shadow: rgba(36, 39, 32, .09);
+  --ui-surface: oklch(0.997 0.001 106.45);
+  --ui-sidebar: oklch(0.973 0.004 106.45);
+  --ui-canvas: oklch(0.997 0.001 106.45);
+  --ui-text: oklch(0.2852 0.0094 124.82);
+  --ui-muted: oklch(0.4594 0.0070 153.62);
+  --ui-subtle: oklch(0.67 0.006 153.62);
+  --ui-border: oklch(0.906 0.006 106.55);
+  --ui-hover: oklch(0.945 0.005 106.45);
+  --ui-shadow: oklch(0.25 0.01 124.82 / .09);
   background: var(--ui-surface);
 }
 
@@ -473,7 +473,7 @@ body {
   position: absolute;
   top: 50%;
   left: 12px;
-  color: var(--ui-text);
+  color: var(--ui-muted);
   pointer-events: none;
   transform: translateY(-50%);
 }
@@ -493,7 +493,7 @@ body {
 }
 
 .document-search::placeholder {
-  color: var(--ui-subtle);
+  color: oklch(0.67 0.006 153.62);
 }
 
 .document-search::-webkit-search-cancel-button {
@@ -538,7 +538,7 @@ body {
   height: 40px;
   margin: 0 12px 14px;
   padding: 0 14px;
-  color: #fff;
+  color: oklch(0.99 0.002 106.45);
   font-size: 12px;
   letter-spacing: .02em;
   border: 0;
@@ -554,20 +554,20 @@ body {
 .sidebar-content.folder-only {
   margin-top: 0;
   padding: 0 8px 10px;
-  scrollbar-color: #c8cac3 transparent;
+  scrollbar-color: var(--ui-border) transparent;
 }
 
 .section-heading {
   min-height: 31px;
   padding: 6px 9px 5px;
-  color: #5b5f56;
+  color: var(--ui-muted);
   font-size: 10px;
   font-weight: 650;
   letter-spacing: .1em;
 }
 
 .section-actions button {
-  color: var(--ui-text);
+  color: var(--ui-muted);
 }
 
 .section-actions button:hover {
@@ -576,15 +576,15 @@ body {
 }
 
 .folder-placeholder {
-  color: var(--ui-text);
+  color: var(--ui-muted);
   background: rgba(255, 255, 255, .55);
-  border-color: #d8d9d2;
+  border-color: var(--ui-border);
 }
 
 button.folder-placeholder:hover {
   color: var(--ui-text);
   background: #fff;
-  border-color: #bfc2b8;
+  border-color: var(--ui-muted);
 }
 
 .folder-empty strong {
@@ -612,7 +612,7 @@ button.folder-placeholder:hover {
   height: 34px;
   gap: 7px;
   padding-right: 8px;
-  color: var(--ui-text);
+  color: var(--ui-muted);
   border-radius: 7px;
 }
 
@@ -641,7 +641,7 @@ button.folder-placeholder:hover {
 .tree-directory .tree-chevron,
 .tree-row.file > svg,
 .tree-row.file:not(.unsupported) > svg {
-  color: #6b7066;
+  color: var(--ui-muted);
 }
 
 .tree-directory .folder-closed,
@@ -652,7 +652,7 @@ button.folder-placeholder:hover {
 
 .tree-row.unsupported,
 .tree-row.unsupported:hover {
-  color: #b0b2ac;
+  color: var(--ui-subtle);
 }
 
 .document-search-summary {
@@ -701,7 +701,7 @@ button.folder-placeholder:hover {
 }
 
 .settings-button span {
-  color: var(--ui-text);
+  color: var(--ui-muted);
   font-size: 12px;
 }
 
@@ -817,7 +817,7 @@ button.folder-placeholder:hover {
 
 .view-switcher {
   padding: 3px;
-  background: #efefeb;
+  background: oklch(0.945 0.005 106.45);
   border-radius: 8px;
 }
 
@@ -830,7 +830,7 @@ button.folder-placeholder:hover {
 
 .view-switcher button.active {
   color: var(--ui-text);
-  background: #fff;
+  background: var(--ui-surface);
   box-shadow: 0 1px 4px var(--ui-shadow);
 }
 
@@ -863,7 +863,7 @@ button.folder-placeholder:hover {
   width: min(100%, 760px);
   padding: 32px 48px 96px;
   color: var(--ui-text);
-  font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   line-height: 1.8;
 }
 
@@ -911,7 +911,7 @@ button.folder-placeholder:hover {
 
 .document-outline {
   padding: 17px 15px 24px;
-  background: #fafaf8;
+  background: oklch(0.986 0.003 106.45);
   border-color: var(--ui-border);
 }
 

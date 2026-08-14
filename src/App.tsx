@@ -857,7 +857,7 @@ function App() {
           <div className="library-identity">
             <span className="brand-mark"><img src="/superwiki-logo.png" alt="" /></span>
             <span className="library-name">
-              {workspace?.name ?? "个人知识库"}
+              SuperWiki
               <small>{workspace ? "本地工作区" : "尚未选择文件夹"}</small>
             </span>
           </div>
