@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -13,6 +14,7 @@ import {
   Image as ImageIcon,
   Maximize2,
   FolderOpen,
+  Info,
   PanelLeftClose,
   PanelRightClose,
   Pencil,
@@ -146,6 +148,8 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<"appearance" | "about">("appearance");
+  const [appVersion, setAppVersion] = useState("");
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
     const storedTheme = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
     const redesignMigrated = localStorage.getItem(THEME_COLOR_REDESIGN_MIGRATION_KEY) === "1";
@@ -361,6 +365,20 @@ function App() {
   useEffect(() => {
     if (activeFile?.kind !== "markdown") setDocumentFullscreen(false);
   }, [activeFile?.kind]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getVersion()
+      .then((version) => {
+        if (!cancelled) setAppVersion(version);
+      })
+      .catch(() => {
+        // 获取版本号失败时保持为空，不影响其他功能
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -1321,32 +1339,61 @@ function App() {
             </header>
             <div className="settings-layout">
               <nav className="settings-nav" aria-label="设置分类">
-                <button className="active" aria-current="page">
+                <button
+                  className={settingsSection === "appearance" ? "active" : ""}
+                  aria-current={settingsSection === "appearance" ? "page" : undefined}
+                  onClick={() => setSettingsSection("appearance")}
+                >
                   <Settings size={16} />外观
+                </button>
+                <button
+                  className={settingsSection === "about" ? "active" : ""}
+                  aria-current={settingsSection === "about" ? "page" : undefined}
+                  onClick={() => setSettingsSection("about")}
+                >
+                  <Info size={16} />关于
                 </button>
               </nav>
               <div className="settings-content">
-                <div className="settings-section-heading">
-                  <h3>外观</h3>
-                  <p>选择应用的主色调，修改后会立即生效。</p>
-                </div>
-                <div className="theme-color-grid" role="group" aria-label="主色调">
-                  {THEME_COLORS.map((theme) => (
-                    <button
-                      key={theme.id}
-                      className={`theme-color-option ${themeColor === theme.id ? "active" : ""}`}
-                      aria-pressed={themeColor === theme.id}
-                      onClick={() => {
-                        setThemeColor(theme.id);
-                        localStorage.setItem(THEME_COLOR_STORAGE_KEY, theme.id);
-                      }}
-                    >
-                      <span className="theme-color-swatch" style={{ backgroundColor: theme.color }} />
-                      <span>{theme.name}</span>
-                      {themeColor === theme.id && <span className="theme-selected-mark">✓</span>}
-                    </button>
-                  ))}
-                </div>
+                {settingsSection === "appearance" ? (
+                  <>
+                    <div className="settings-section-heading">
+                      <h3>外观</h3>
+                      <p>选择应用的主色调，修改后会立即生效。</p>
+                    </div>
+                    <div className="theme-color-grid" role="group" aria-label="主色调">
+                      {THEME_COLORS.map((theme) => (
+                        <button
+                          key={theme.id}
+                          className={`theme-color-option ${themeColor === theme.id ? "active" : ""}`}
+                          aria-pressed={themeColor === theme.id}
+                          onClick={() => {
+                            setThemeColor(theme.id);
+                            localStorage.setItem(THEME_COLOR_STORAGE_KEY, theme.id);
+                          }}
+                        >
+                          <span className="theme-color-swatch" style={{ backgroundColor: theme.color }} />
+                          <span>{theme.name}</span>
+                          {themeColor === theme.id && <span className="theme-selected-mark">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="about-section">
+                    <div className="settings-section-heading">
+                      <h3>关于</h3>
+                      <p>当前客户端的版本信息。</p>
+                    </div>
+                    <div className="about-card">
+                      <img className="about-logo" src="/superwiki-logo.png" alt="SuperWiki" />
+                      <div className="about-info">
+                        <span className="about-name">SuperWiki</span>
+                        <span className="about-version">{appVersion ? `v${appVersion}` : "版本号获取中…"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </section>
