@@ -1,6 +1,6 @@
 [package]
 name = "superwiki"
-version = "0.6.1"
+version = "0.6.2"
 description = "A local Markdown notes app"
 authors = []
 edition = "2021"
