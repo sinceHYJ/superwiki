@@ -1082,8 +1082,7 @@ function App() {
             aria-label="打开设置"
           >
             <Settings size={15} />
-            <span>偏好设置</span>
-            <small>本地</small>
+            <span>设置</span>
           </button>
         </div>
       </aside>
