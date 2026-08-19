@@ -32,6 +32,7 @@ import { isMermaidLanguage } from "./mermaidRenderer";
 import PlantUmlDiagram from "./PlantUmlDiagram";
 import VideoEmbedPreview from "./VideoEmbedPreview";
 import { isPlantUmlLanguage } from "./plantumlRenderer";
+import { remarkLineBreak } from "./remarkLineBreak";
 import { remarkVideoEmbed } from "./remarkVideoEmbed";
 import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
 import "./App.css";
@@ -1679,7 +1680,7 @@ type MarkdownPreviewProps = {
 const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, documentPath }: MarkdownPreviewProps) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkVideoEmbed]}
+      remarkPlugins={[remarkGfm, remarkVideoEmbed, remarkLineBreak]}
       components={{
         code: ({ className, children, ...props }) => {
           const language = /(?:^|\s)language-([^\s]+)/.exec(className ?? "")?.[1];
