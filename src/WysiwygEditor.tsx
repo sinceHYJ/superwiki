@@ -153,7 +153,12 @@ function WysiwygEditorInner({
   useEditor((root) => {
     const editorScrollElement = root.closest<HTMLElement>(".wysiwyg-editor") ?? root.parentElement;
     let proseMirrorElement: HTMLElement | null = null;
-    let pendingScrollTop: number | null = null;
+    let inputScrollTop: number | null = null;
+    let inputRestoreFrame: number | null = null;
+    let restoringInputScroll = false;
+    let composing = false;
+    let pendingPointerScrollTop: number | null = null;
+    let pointerDownRestoreFrame: number | null = null;
     let restoreScrollFrame: number | null = null;
 
     const getSelectionRect = () => {
@@ -165,31 +170,50 @@ function WysiwygEditorInner({
       return rect.height > 0 ? rect : range.getClientRects()[0] ?? null;
     };
 
-    const captureVisibleSelectionScroll = () => {
+    const beginInputScrollLock = () => {
       const selectionRect = getSelectionRect();
       const editorRect = editorScrollElement?.getBoundingClientRect();
       if (!selectionRect || !editorRect) return;
 
-      const selectionIsVisible = selectionRect.top >= editorRect.top
+      const topBarRect = root.querySelector<HTMLElement>(".milkdown-top-bar")?.getBoundingClientRect();
+      const visibleTop = Math.max(editorRect.top, topBarRect?.bottom ?? editorRect.top);
+      // 以行中心（而非行顶）判定可见：光标行顶部被置顶工具栏少量遮挡时仍视为可见，
+      // 避免输入过程中的锁定失效让原生选区滚动把页面拉走。
+      const selectionIsVisible = selectionRect.top + (selectionRect.bottom - selectionRect.top) / 2 >= visibleTop
         && selectionRect.bottom <= editorRect.bottom;
-      if (selectionIsVisible) pendingScrollTop = editorScrollElement?.scrollTop ?? null;
+      if (selectionIsVisible && inputScrollTop === null) inputScrollTop = editorScrollElement?.scrollTop ?? null;
     };
 
-    const restoreVisibleSelectionScroll = () => {
-      if (restoreScrollFrame !== null) window.cancelAnimationFrame(restoreScrollFrame);
-      restoreScrollFrame = window.requestAnimationFrame(() => {
-        restoreScrollFrame = null;
-        const scrollTop = pendingScrollTop;
-        pendingScrollTop = null;
-        if (scrollTop === null || !editorScrollElement) return;
+    const restoreInputScroll = () => {
+      if (inputScrollTop === null || !editorScrollElement) return;
+      restoringInputScroll = true;
+      editorScrollElement.scrollTop = inputScrollTop;
+      restoringInputScroll = false;
+    };
 
-        const selectionRect = getSelectionRect();
-        const editorRect = editorScrollElement.getBoundingClientRect();
-        const selectionIsVisible = selectionRect
-          && selectionRect.top >= editorRect.top
-          && selectionRect.bottom <= editorRect.bottom;
-        if (selectionIsVisible) editorScrollElement.scrollTop = scrollTop;
+    const releaseInputScrollLock = () => {
+      // 输入法组合期间保持锁定：组合中 input 事件频繁触发，且组合选区非折叠无法重新锁定，
+      // 提前解除会让原生 caret 跟随滚动在组合中途把页面拉走。
+      if (composing) return;
+      if (inputRestoreFrame !== null) window.cancelAnimationFrame(inputRestoreFrame);
+      inputRestoreFrame = window.requestAnimationFrame(() => {
+        inputRestoreFrame = window.requestAnimationFrame(() => {
+          inputRestoreFrame = null;
+          restoreInputScroll();
+          inputScrollTop = null;
+        });
       });
+    };
+
+    const cancelInputScrollLock = () => {
+      if (inputRestoreFrame !== null) window.cancelAnimationFrame(inputRestoreFrame);
+      inputRestoreFrame = null;
+      inputScrollTop = null;
+    };
+
+    const handleEditorScroll = () => {
+      if (restoringInputScroll || inputScrollTop === null) return;
+      restoreInputScroll();
     };
 
     const captureVisibleEditorScroll = (event: MouseEvent) => {
@@ -201,18 +225,72 @@ function WysiwygEditorInner({
       const targetRect = target?.getBoundingClientRect();
       if (!editorRect || !targetRect) return;
 
-      const targetIsVisible = targetRect.top >= editorRect.top
+      // 与输入锁定一致的行中心判定：目标行顶部少量滚出容器仍可点击编辑，不应触发滚动对抗。
+      const targetIsVisible = targetRect.top + targetRect.height / 2 >= editorRect.top
         && targetRect.bottom <= editorRect.bottom;
-      if (targetIsVisible) pendingScrollTop = editorScrollElement?.scrollTop ?? null;
+      if (!targetIsVisible) return;
+
+      pendingPointerScrollTop = editorScrollElement?.scrollTop ?? null;
+      // 按下定位光标时浏览器可能把光标行滚到容器顶（即使行本身可见），起手时页面轻微上滑；
+      // 下一帧恢复。拖动到视口边缘的自动滚动发生在之后的帧，不受影响。
+      if (pointerDownRestoreFrame !== null) window.cancelAnimationFrame(pointerDownRestoreFrame);
+      pointerDownRestoreFrame = window.requestAnimationFrame(() => {
+        pointerDownRestoreFrame = null;
+        if (pendingPointerScrollTop !== null && editorScrollElement
+          && editorScrollElement.scrollTop !== pendingPointerScrollTop) {
+          editorScrollElement.scrollTop = pendingPointerScrollTop;
+        }
+      });
     };
 
-    const restoreOnSelectionChange = () => {
-      if (!root.ownerDocument.activeElement || !root.contains(root.ownerDocument.activeElement)) return;
-      restoreVisibleSelectionScroll();
+    const restorePointerScroll = () => {
+      if (pendingPointerScrollTop === null || !editorScrollElement) {
+        pendingPointerScrollTop = null;
+        return;
+      }
+
+      const selection = root.ownerDocument.getSelection();
+      if (!selection?.isCollapsed) {
+        // 拖选结束后选区整体仍在视野内时恢复按下前的位置：拖选几个字的场景里，
+        // 按下/拖动过程中的原生光标滚动是多余的。选区已延伸出视野（拖到边缘的自动滚动）则保留。
+        const selectionRect = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+        const editorRect = editorScrollElement.getBoundingClientRect();
+        const topBarRect = root.querySelector<HTMLElement>(".milkdown-top-bar")?.getBoundingClientRect();
+        const visibleTop = Math.max(editorRect.top, topBarRect?.bottom ?? editorRect.top);
+        const selectionIsVisible = !!selectionRect
+          && selectionRect.top + selectionRect.height / 2 >= visibleTop
+          && selectionRect.bottom <= editorRect.bottom;
+        if (!selectionIsVisible) {
+          pendingPointerScrollTop = null;
+          return;
+        }
+      }
+
+      const scrollTop = pendingPointerScrollTop;
+      pendingPointerScrollTop = null;
+      if (restoreScrollFrame !== null) window.cancelAnimationFrame(restoreScrollFrame);
+      restoreScrollFrame = window.requestAnimationFrame(() => {
+        restoreScrollFrame = window.requestAnimationFrame(() => {
+          restoreScrollFrame = null;
+          editorScrollElement.scrollTop = scrollTop;
+        });
+      });
     };
 
-    root.addEventListener("beforeinput", captureVisibleSelectionScroll, true);
-    root.addEventListener("input", restoreVisibleSelectionScroll, true);
+    const handleCompositionStart = () => {
+      composing = true;
+      beginInputScrollLock();
+    };
+
+    const handleCompositionEnd = () => {
+      composing = false;
+      releaseInputScrollLock();
+    };
+
+    root.addEventListener("beforeinput", beginInputScrollLock, true);
+    root.addEventListener("compositionstart", handleCompositionStart, true);
+    root.addEventListener("input", releaseInputScrollLock, true);
+    root.addEventListener("compositionend", handleCompositionEnd, true);
 
     const crepe = new CrepeBuilder({ root, defaultValue: initialValue })
       .addFeature(codeMirror, {
@@ -274,20 +352,24 @@ function WysiwygEditorInner({
       .addFeature(topBar);
 
     crepe.editor.config((ctx) => {
-      ctx.update(editorViewOptionsCtx.key, (options) => ({
+      ctx.update(editorViewOptionsCtx, (options) => ({
         ...options,
         handleScrollToSelection: (view) => {
           const editorRect = editorScrollElement?.getBoundingClientRect();
           if (!editorRect) return true;
+          if (inputScrollTop !== null) return true;
+          if (!view.state.selection.empty) return true;
 
           const topBarRect = root.querySelector<HTMLElement>(".milkdown-top-bar")?.getBoundingClientRect();
           const visibleTop = Math.max(editorRect.top, topBarRect?.bottom ?? editorRect.top);
           const selectionRect = view.coordsAtPos(view.state.selection.head);
 
-          if (selectionRect.top < visibleTop) {
-            editorScrollElement.scrollTop -= visibleTop - selectionRect.top;
+          // 仅当光标行中部也被遮挡时才向上滚动：行顶被置顶工具栏少量遮住属于正常阅读位置，
+          // 按行顶判定会在编辑这些行时产生突然的向上跳动。
+          if (selectionRect.top + (selectionRect.bottom - selectionRect.top) / 2 < visibleTop) {
+            editorScrollElement!.scrollTop -= visibleTop - selectionRect.top;
           } else if (selectionRect.bottom > editorRect.bottom) {
-            editorScrollElement.scrollTop += selectionRect.bottom - editorRect.bottom;
+            editorScrollElement!.scrollTop += selectionRect.bottom - editorRect.bottom;
           }
 
           return true;
@@ -305,10 +387,11 @@ function WysiwygEditorInner({
           onReadyRef.current(() => serializeCodeBlockTitles(crepe.getMarkdown(), readCodeBlockTitles(root)));
           topBarElement = root.querySelector<HTMLElement>(".milkdown-top-bar");
           topBarElement?.addEventListener("wheel", scrollTopBarWithMouseWheel, { passive: false });
+          editorScrollElement?.addEventListener("scroll", handleEditorScroll, { passive: true });
+          editorScrollElement?.addEventListener("wheel", cancelInputScrollLock, { passive: true });
           proseMirrorElement = root.querySelector<HTMLElement>(".ProseMirror");
           proseMirrorElement?.addEventListener("mousedown", captureVisibleEditorScroll, true);
-          root.ownerDocument.addEventListener("selectionchange", restoreOnSelectionChange, true);
-          root.addEventListener("focusin", restoreOnSelectionChange, true);
+          proseMirrorElement?.addEventListener("mouseup", restorePointerScroll, true);
 
           const decorateCodeBlocks = () => {
             root.querySelectorAll<HTMLElement>(".milkdown-code-block").forEach((block, index) => {
@@ -328,12 +411,22 @@ function WysiwygEditorInner({
           topBarElement?.removeEventListener("wheel", scrollTopBarWithMouseWheel);
           codeBlockObserver?.disconnect();
           codeBlockObserver = null;
-          root.removeEventListener("beforeinput", captureVisibleSelectionScroll, true);
-          root.removeEventListener("input", restoreVisibleSelectionScroll, true);
+          root.removeEventListener("beforeinput", beginInputScrollLock, true);
+          root.removeEventListener("compositionstart", handleCompositionStart, true);
+          root.removeEventListener("input", releaseInputScrollLock, true);
+          root.removeEventListener("compositionend", handleCompositionEnd, true);
+          editorScrollElement?.removeEventListener("scroll", handleEditorScroll);
+          editorScrollElement?.removeEventListener("wheel", cancelInputScrollLock);
+          if (inputRestoreFrame !== null) window.cancelAnimationFrame(inputRestoreFrame);
+          inputRestoreFrame = null;
+          inputScrollTop = null;
+          composing = false;
           proseMirrorElement?.removeEventListener("mousedown", captureVisibleEditorScroll, true);
-          root.ownerDocument.removeEventListener("selectionchange", restoreOnSelectionChange, true);
-          root.removeEventListener("focusin", restoreOnSelectionChange, true);
+          proseMirrorElement?.removeEventListener("mouseup", restorePointerScroll, true);
           proseMirrorElement = null;
+          pendingPointerScrollTop = null;
+          if (pointerDownRestoreFrame !== null) window.cancelAnimationFrame(pointerDownRestoreFrame);
+          pointerDownRestoreFrame = null;
           if (restoreScrollFrame !== null) window.cancelAnimationFrame(restoreScrollFrame);
           onReadyRef.current(null);
         });

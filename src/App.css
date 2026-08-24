@@ -244,13 +244,17 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-divider { margin: 6px 10px; }
 .wysiwyg-editor .milkdown h1, .wysiwyg-editor .milkdown h2, .wysiwyg-editor .milkdown h3 { color: #23241f; letter-spacing: -.025em; }
 .wysiwyg-editor .milkdown .ProseMirror h1 { font-size: 36px; }
-.wysiwyg-editor .milkdown .ProseMirror > h1:first-child { margin-top: 0; }
+/* 虚拟光标插件会在文档开头常驻一个装饰元素（未聚焦时类名为 ProseMirror-widget，
+   聚焦后变为 prosemirror-virtual-cursor），导致 h1 在不同状态下于 :first-child
+   两种匹配间切换；所有状态都要清零顶边距，避免点击/选中文字时内容跳位。 */
+.wysiwyg-editor .milkdown .ProseMirror > h1:first-child,
+.wysiwyg-editor .milkdown .ProseMirror > .ProseMirror-widget + h1,
+.wysiwyg-editor .milkdown .ProseMirror > .prosemirror-virtual-cursor + h1 { margin-top: 0; }
 .wysiwyg-editor .milkdown .ProseMirror h2 { font-size: 32px; }
 .wysiwyg-editor .milkdown .ProseMirror h3 { font-size: 28px; }
 .wysiwyg-editor .milkdown .ProseMirror h4 { font-size: 24px; }
 .wysiwyg-editor .milkdown .ProseMirror h5 { font-size: 21px; }
 .wysiwyg-editor .milkdown .ProseMirror h6 { font-size: 17px; }
-.wysiwyg-editor .milkdown .ProseMirror :is(h1, h2, h3, h4, h5, h6) { scroll-margin-top: 48px; }
 .wysiwyg-editor .milkdown .milkdown-image-block > .image-wrapper img { min-height: 0; }
 .wysiwyg-editor .milkdown .ProseMirror code::selection { background: #ffd60a; }
 .markdown-body code::selection { background: #ffd60a; }

@@ -795,7 +795,20 @@ function App() {
       });
     };
 
-    if (viewMode !== "preview") scrollInPane(editorPaneRef.current);
+    // 编辑器滚动容器上禁用了标题的 scroll-margin-top（会放大原生选区滚动导致编辑时页面上滑），
+    // 因此编辑器侧手动计算目标位置以避开置顶工具栏。
+    if (viewMode !== "preview") {
+      const pane = editorPaneRef.current;
+      const heading = pane?.querySelectorAll<HTMLElement>(selector)[index];
+      const scroller = pane?.querySelector<HTMLElement>(".wysiwyg-editor");
+      if (heading && scroller) {
+        const target = heading.getBoundingClientRect().top
+          - scroller.getBoundingClientRect().top
+          + scroller.scrollTop
+          - 48;
+        scroller.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+      }
+    }
     if (viewMode !== "editor") scrollInPane(previewPaneRef.current);
   }, [viewMode]);
 
