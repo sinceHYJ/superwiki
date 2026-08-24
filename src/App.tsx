@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
@@ -34,6 +34,7 @@ import VideoEmbedPreview from "./VideoEmbedPreview";
 import { isPlantUmlLanguage } from "./plantumlRenderer";
 import { remarkLineBreak } from "./remarkLineBreak";
 import { remarkVideoEmbed } from "./remarkVideoEmbed";
+import { DEFAULT_CODE_BLOCK_TITLE, extractCodeBlockTitles } from "./codeBlockMetadata";
 import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
 import "./App.css";
 
@@ -1678,10 +1679,27 @@ type MarkdownPreviewProps = {
 };
 
 const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, documentPath }: MarkdownPreviewProps) {
+  const codeBlockTitles = extractCodeBlockTitles(content);
+  let codeBlockIndex = 0;
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkVideoEmbed, remarkLineBreak]}
       components={{
+        pre: ({ children, ...props }) => {
+          const title = codeBlockTitles[codeBlockIndex] ?? "";
+          codeBlockIndex += 1;
+          const codeChild = Children.toArray(children).find((child) => isValidElement(child));
+          if (!isValidElement(codeChild)) return <pre {...props}>{children}</pre>;
+
+          const codeProps = codeChild.props as { className?: string; children?: unknown };
+          const language = /(?:^|\s)language-([^\s]+)/.exec(codeProps.className ?? "")?.[1];
+          const source = String(codeProps.children ?? "").replace(/\n$/, "");
+          if (isMermaidLanguage(language) || isPlantUmlLanguage(language)) {
+            return <pre {...props}>{children}</pre>;
+          }
+          return <CodeBlockPreview language={language} title={title} source={source}>{children}</CodeBlockPreview>;
+        },
         code: ({ className, children, ...props }) => {
           const language = /(?:^|\s)language-([^\s]+)/.exec(className ?? "")?.[1];
           const source = String(children).replace(/\n$/, "");
@@ -1718,6 +1736,43 @@ const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, 
     </ReactMarkdown>
   );
 });
+
+function CodeBlockPreview({
+  language,
+  title,
+  source,
+  children,
+}: {
+  language?: string;
+  title: string;
+  source: string;
+  children: React.ReactNode;
+}) {
+  const [wrap, setWrap] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const copyCode = async () => {
+    await writeText(source);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <div className={`preview-code-block${wrap ? " is-wrapped" : ""}`}>
+      <div className="preview-code-toolbar">
+        <span className="preview-code-title">{title || DEFAULT_CODE_BLOCK_TITLE}</span>
+        <div className="preview-code-actions">
+          <span className="preview-code-language">{language || "纯文本"}</span>
+          <button type="button" onClick={() => setWrap((value) => !value)} aria-pressed={wrap}>
+            {wrap ? "取消换行" : "自动换行"}
+          </button>
+          <button type="button" onClick={() => void copyCode}>{copied ? "已复制" : "复制"}</button>
+        </div>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  );
+}
 
 function WorkspaceMarkdownImage({ source, alt, workspaceRoot, documentPath }: {
   source?: string;
