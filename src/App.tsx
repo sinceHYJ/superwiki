@@ -416,7 +416,7 @@ function App() {
         setSaveState("error");
         setError(String(reason));
       }
-    }, 500);
+    }, 1000);
 
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
