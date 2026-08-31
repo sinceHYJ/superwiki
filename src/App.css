@@ -241,6 +241,11 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-heading-selector { padding: 2px 6px; }
 .wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-item { margin: 2px 6px; }
 .wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-divider { margin: 6px 10px; }
+.wysiwyg-editor .milkdown .milkdown-top-bar .top-bar-item:not(.active) svg,
+.wysiwyg-editor .milkdown .milkdown-toolbar .toolbar-item:not(.active) svg {
+  color: var(--crepe-color-on-surface-variant);
+  fill: var(--crepe-color-on-surface-variant);
+}
 .wysiwyg-editor .milkdown h1, .wysiwyg-editor .milkdown h2, .wysiwyg-editor .milkdown h3 { color: #23241f; letter-spacing: -.025em; }
 .wysiwyg-editor .milkdown .ProseMirror h1 { font-size: 36px; }
 /* 虚拟光标插件会在文档开头常驻一个装饰元素（未聚焦时类名为 ProseMirror-widget，
