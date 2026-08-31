@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "SuperWiki",
+        "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "width": 1280,
         "height": 800,

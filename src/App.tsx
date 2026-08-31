@@ -1,6 +1,7 @@
 import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -126,7 +127,8 @@ const DEFAULT_SIDEBAR_WIDTH = 286;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
 const MIN_WORKSPACE_WIDTH = 360;
-const OPEN_IN_FILE_MANAGER_LABEL = /Macintosh|Mac OS X/i.test(navigator.userAgent)
+const IS_MACOS = /Macintosh|Mac OS X/i.test(navigator.userAgent);
+const OPEN_IN_FILE_MANAGER_LABEL = IS_MACOS
   ? "在 Finder 中打开"
   : "在文件管理器打开";
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
@@ -865,6 +867,11 @@ function App() {
     setSidebarWidth((width) => clampSidebarWidth(width + direction));
   };
 
+  const handleTitlebarMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.buttons !== 1) return;
+    void getCurrentWindow().startDragging();
+  };
+
   const activeRelativePath = activeFile
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
@@ -881,10 +888,27 @@ function App() {
 
   return (
     <main
-      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""}`}
+      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""} ${IS_MACOS ? "macos-window" : ""}`}
       data-theme={themeColor}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
+      {IS_MACOS && (
+        <>
+          <div className="window-titlebar-drag-region" onMouseDown={handleTitlebarMouseDown} />
+          <div className="window-titlebar-actions">
+            <button
+              className="settings-button"
+              onClick={() => setSettingsOpen(true)}
+              title="设置"
+              aria-label="打开设置"
+            >
+              <Settings size={15} />
+              <span>设置</span>
+            </button>
+          </div>
+        </>
+      )}
+
       <aside className="sidebar">
         <div className="sidebar-head">
           <div className="library-identity">
@@ -1089,17 +1113,19 @@ function App() {
           </div>
         )}
 
-        <div className="sidebar-footer">
-          <button
-            className="settings-button"
-            onClick={() => setSettingsOpen(true)}
-            title="设置"
-            aria-label="打开设置"
-          >
-            <Settings size={15} />
-            <span>设置</span>
-          </button>
-        </div>
+        {!IS_MACOS && (
+          <div className="sidebar-footer">
+            <button
+              className="settings-button"
+              onClick={() => setSettingsOpen(true)}
+              title="设置"
+              aria-label="打开设置"
+            >
+              <Settings size={15} />
+              <span>设置</span>
+            </button>
+          </div>
+        )}
       </aside>
 
       {sidebarOpen && (

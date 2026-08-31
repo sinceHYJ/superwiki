@@ -70,6 +70,50 @@ button { font: inherit; }
   --accent-primary: #c4b5fd; --accent-primary-hover: #ddd6fe; --accent-strong: #6d28d9; --accent-medium: #a78bfa; --accent-folder: #c4b5fd; --accent-border: #7c3aed; --accent-soft: #ede9fe; --accent-soft-hover: #ede9fe; --accent-secondary: #ddd6fe; --accent-on-secondary: #4c1d95; --accent-editor-hover: #f5f3ff; --accent-selected: #ede9fe; --accent-outline: #7c3aed; --accent-link: #6d28d9; --accent-quote-bg: #f5f3ff; --accent-quote-border: #a78bfa; --accent-on-primary: #4c1d95; --accent-icon: #6d28d9;
 }
 
+.app-shell.macos-window {
+  padding-top: 32px;
+}
+
+.window-titlebar-drag-region {
+  position: fixed;
+  z-index: 8;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 32px;
+}
+
+.window-titlebar-actions {
+  position: fixed;
+  z-index: 9;
+  top: 0;
+  right: 16px;
+}
+
+.window-titlebar-actions .settings-button {
+  display: flex;
+  width: auto;
+  height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.window-titlebar-actions .settings-button span {
+  color: inherit;
+  font-size: 13px;
+}
+
+.window-titlebar-actions .settings-button:hover {
+  color: var(--ui-text);
+  background: transparent;
+}
+
 .app-shell.sidebar-resizing { cursor: col-resize; transition: none; user-select: none; }
 .app-shell.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .sidebar-collapsed .sidebar { transform: translateX(-100%); }
