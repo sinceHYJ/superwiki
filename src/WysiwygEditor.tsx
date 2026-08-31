@@ -9,7 +9,6 @@ import { linkTooltip } from "@milkdown/crepe/feature/link-tooltip";
 import { listItem } from "@milkdown/crepe/feature/list-item";
 import { placeholder } from "@milkdown/crepe/feature/placeholder";
 import { table } from "@milkdown/crepe/feature/table";
-import { toolbar } from "@milkdown/crepe/feature/toolbar";
 import { topBar } from "@milkdown/crepe/feature/top-bar";
 import { editorViewOptionsCtx } from "@milkdown/kit/core";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
@@ -30,7 +29,6 @@ import "@milkdown/crepe/theme/common/link-tooltip.css";
 import "@milkdown/crepe/theme/common/list-item.css";
 import "@milkdown/crepe/theme/common/placeholder.css";
 import "@milkdown/crepe/theme/common/table.css";
-import "@milkdown/crepe/theme/common/toolbar.css";
 import "@milkdown/crepe/theme/common/top-bar.css";
 import "@milkdown/crepe/theme/frame.css";
 
@@ -348,7 +346,6 @@ function WysiwygEditorInner({
         mode: "doc",
       })
       .addFeature(table)
-      .addFeature(toolbar)
       .addFeature(topBar);
 
     crepe.editor.config((ctx) => {
