@@ -14,6 +14,8 @@ import {
   Folder,
   Image as ImageIcon,
   Maximize2,
+  Minimize2,
+  Minus,
   FolderOpen,
   Info,
   PanelLeftClose,
@@ -128,6 +130,8 @@ const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
 const MIN_WORKSPACE_WIDTH = 360;
 const IS_MACOS = /Macintosh|Mac OS X/i.test(navigator.userAgent);
+const IS_WINDOWS = /Windows/i.test(navigator.userAgent);
+const HAS_OVERLAY_TITLEBAR = IS_MACOS || IS_WINDOWS;
 const OPEN_IN_FILE_MANAGER_LABEL = IS_MACOS
   ? "在 Finder 中打开"
   : "在文件管理器打开";
@@ -152,6 +156,7 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [windowMaximized, setWindowMaximized] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"appearance" | "about">("appearance");
   const [appVersion, setAppVersion] = useState("");
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
@@ -888,7 +893,7 @@ function App() {
 
   return (
     <main
-      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""} ${IS_MACOS ? "macos-window" : ""}`}
+      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""} ${HAS_OVERLAY_TITLEBAR ? `overlay-window ${IS_WINDOWS ? "windows-window" : ""}` : ""}`}
       data-theme={themeColor}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
@@ -907,6 +912,61 @@ function App() {
             </button>
           </div>
         </>
+      )}
+
+      {IS_WINDOWS && (
+        <div className="windows-titlebar">
+          <div
+            className="windows-titlebar-drag-region"
+            onMouseDown={handleTitlebarMouseDown}
+            onDoubleClick={() => {
+              void getCurrentWindow().toggleMaximize();
+              setWindowMaximized((value) => !value);
+            }}
+          />
+          <div className="windows-titlebar-brand">
+            <img src="/superwiki-logo.png" alt="" />
+            <span>SuperWiki</span>
+          </div>
+          <div className="windows-titlebar-actions">
+            <button
+              className="windows-titlebar-settings"
+              onClick={() => setSettingsOpen(true)}
+              title="设置"
+              aria-label="打开设置"
+            >
+              <Settings size={15} />
+              <span>设置</span>
+            </button>
+            <button
+              className="windows-titlebar-control"
+              onClick={() => void getCurrentWindow().minimize()}
+              title="最小化"
+              aria-label="最小化窗口"
+            >
+              <Minus size={16} />
+            </button>
+            <button
+              className="windows-titlebar-control"
+              onClick={() => {
+                void getCurrentWindow().toggleMaximize();
+                setWindowMaximized((value) => !value);
+              }}
+              title={windowMaximized ? "还原" : "最大化"}
+              aria-label={windowMaximized ? "还原窗口" : "最大化窗口"}
+            >
+              {windowMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <button
+              className="windows-titlebar-control windows-titlebar-close"
+              onClick={() => void getCurrentWindow().close()}
+              title="关闭"
+              aria-label="关闭窗口"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
       )}
 
       <aside className="sidebar">
@@ -1113,7 +1173,7 @@ function App() {
           </div>
         )}
 
-        {!IS_MACOS && (
+        {!HAS_OVERLAY_TITLEBAR && (
           <div className="sidebar-footer">
             <button
               className="settings-button"

@@ -70,7 +70,8 @@ button { font: inherit; }
   --accent-primary: #c4b5fd; --accent-primary-hover: #ddd6fe; --accent-strong: #6d28d9; --accent-medium: #a78bfa; --accent-folder: #c4b5fd; --accent-border: #7c3aed; --accent-soft: #ede9fe; --accent-soft-hover: #ede9fe; --accent-secondary: #ddd6fe; --accent-on-secondary: #4c1d95; --accent-editor-hover: #f5f3ff; --accent-selected: #ede9fe; --accent-outline: #7c3aed; --accent-link: #6d28d9; --accent-quote-bg: #f5f3ff; --accent-quote-border: #a78bfa; --accent-on-primary: #4c1d95; --accent-icon: #6d28d9;
 }
 
-.app-shell.macos-window {
+.app-shell.overlay-window,
+.app-shell.windows-window {
   padding-top: 32px;
 }
 
@@ -88,6 +89,90 @@ button { font: inherit; }
   z-index: 9;
   top: 0;
   right: 16px;
+}
+
+.windows-titlebar {
+  position: fixed;
+  z-index: 8;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ui-text);
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
+  user-select: none;
+}
+
+.windows-titlebar-drag-region {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+}
+
+.windows-titlebar-brand,
+.windows-titlebar-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  align-items: center;
+}
+
+.windows-titlebar-brand {
+  gap: 7px;
+  padding-left: 12px;
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+
+.windows-titlebar-brand img {
+  width: 18px;
+  height: 18px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.windows-titlebar-actions {
+  gap: 2px;
+}
+
+.windows-titlebar-settings,
+.windows-titlebar-control {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--ui-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.windows-titlebar-settings {
+  gap: 7px;
+  margin-right: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.windows-titlebar-control {
+  width: 46px;
+}
+
+.windows-titlebar-settings:hover,
+.windows-titlebar-control:hover {
+  color: var(--ui-text);
+  background: var(--ui-hover);
+}
+
+.windows-titlebar-control.windows-titlebar-close:hover {
+  color: #fff;
+  background: #c42b1c;
 }
 
 .window-titlebar-actions .settings-button {

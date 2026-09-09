@@ -4,6 +4,7 @@ use std::{
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
 };
+use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Serialize)]
@@ -639,6 +640,13 @@ fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Respo
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            #[cfg(target_os = "windows")]
+            app.get_webview_window("main")
+                .expect("main window not found")
+                .set_decorations(false)?;
+            Ok(())
+        })
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
