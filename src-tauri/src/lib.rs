@@ -34,6 +34,53 @@ struct AssetUploadMetadata {
     file_name: String,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OssSyncConfig {
+    region: String,
+    endpoint: String,
+    bucket: String,
+    prefix: String,
+    access_key_id: String,
+    #[serde(default)]
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OssSyncSettingsInput {
+    region: String,
+    endpoint: String,
+    bucket: String,
+    prefix: String,
+    access_key_id: String,
+    access_key_secret: Option<String>,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OssSyncSettings {
+    region: String,
+    endpoint: String,
+    bucket: String,
+    prefix: String,
+    access_key_id: String,
+    has_access_key_secret: bool,
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OssSyncCredentials {
+    region: String,
+    endpoint: String,
+    bucket: String,
+    prefix: String,
+    access_key_id: String,
+    access_key_secret: String,
+}
+
 #[derive(Deserialize)]
 struct BilibiliViewResponse {
     code: i32,
@@ -187,6 +234,53 @@ fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
         return Err("文件不在已打开的目录中".into());
     }
     Ok(path)
+}
+
+fn oss_sync_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("无法确定应用配置目录：{error}"))?;
+    fs::create_dir_all(&config_dir).map_err(|error| format!("无法创建应用配置目录：{error}"))?;
+    Ok(config_dir.join("oss-sync.json"))
+}
+
+fn oss_sync_secret_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("com.superwiki.app", "oss-access-key-secret")
+        .map_err(|error| format!("无法访问系统凭据库：{error}"))
+}
+
+fn normalize_oss_prefix(prefix: &str) -> Result<String, String> {
+    let prefix = prefix.trim().trim_matches('/').replace('\\', "/");
+    if prefix.split('/').any(|part| part == "..") {
+        return Err("OSS 远端目录不能包含 ..".into());
+    }
+    Ok(prefix)
+}
+
+fn normalize_oss_endpoint(endpoint: &str) -> Result<String, String> {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    if endpoint.is_empty() {
+        return Err("请填写 OSS Endpoint".into());
+    }
+    if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
+        return Ok(endpoint.to_string());
+    }
+    if endpoint.contains("://") {
+        return Err("OSS Endpoint 必须使用 http 或 https 协议".into());
+    }
+    Ok(format!("https://{endpoint}"))
+}
+
+fn validate_oss_sync_config(config: &OssSyncConfig) -> Result<(), String> {
+    if config.region.trim().is_empty()
+        || config.endpoint.trim().is_empty()
+        || config.bucket.trim().is_empty()
+        || config.access_key_id.trim().is_empty()
+    {
+        return Err("请完整填写区域、Endpoint、Bucket 和 AccessKey ID".into());
+    }
+    Ok(())
 }
 
 fn workspace_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
@@ -361,6 +455,96 @@ fn read_workspace_file(root: String, path: String) -> Result<String, String> {
         return Err("只能读取 Markdown 文件".into());
     }
     fs::read_to_string(path).map_err(|error| format!("无法读取文件：{error}"))
+}
+
+#[tauri::command]
+fn read_workspace_sync_file(root: String, path: String) -> Result<tauri::ipc::Response, String> {
+    let path = workspace_file_path(&root, &path)?;
+    fs::read(path)
+        .map(tauri::ipc::Response::new)
+        .map_err(|error| format!("无法读取同步文件：{error}"))
+}
+
+#[tauri::command]
+fn load_oss_sync_settings(app: tauri::AppHandle) -> Result<Option<OssSyncSettings>, String> {
+    let config_path = oss_sync_config_path(&app)?;
+    if !config_path.exists() {
+        return Ok(None);
+    }
+
+    let mut config: OssSyncConfig = serde_json::from_slice(
+        &fs::read(&config_path).map_err(|error| format!("无法读取 OSS 配置：{error}"))?,
+    )
+    .map_err(|error| format!("OSS 配置无效：{error}"))?;
+    config.endpoint = normalize_oss_endpoint(&config.endpoint)?;
+    validate_oss_sync_config(&config)?;
+    let has_access_key_secret = oss_sync_secret_entry()?.get_password().is_ok();
+
+    Ok(Some(OssSyncSettings {
+        region: config.region,
+        endpoint: config.endpoint,
+        bucket: config.bucket,
+        prefix: config.prefix,
+        access_key_id: config.access_key_id,
+        has_access_key_secret,
+        enabled: config.enabled,
+    }))
+}
+
+#[tauri::command]
+fn save_oss_sync_settings(
+    app: tauri::AppHandle,
+    settings: OssSyncSettingsInput,
+) -> Result<(), String> {
+    let config = OssSyncConfig {
+        region: settings.region.trim().to_string(),
+        endpoint: normalize_oss_endpoint(&settings.endpoint)?,
+        bucket: settings.bucket.trim().to_string(),
+        prefix: normalize_oss_prefix(&settings.prefix)?,
+        access_key_id: settings.access_key_id.trim().to_string(),
+        enabled: settings.enabled,
+    };
+    validate_oss_sync_config(&config)?;
+
+    let secret_entry = oss_sync_secret_entry()?;
+    if let Some(secret) = settings
+        .access_key_secret
+        .filter(|secret| !secret.trim().is_empty())
+    {
+        secret_entry
+            .set_password(&secret)
+            .map_err(|error| format!("无法保存 OSS 密钥到系统凭据库：{error}"))?;
+    } else if secret_entry.get_password().is_err() {
+        return Err("请填写 AccessKey Secret".into());
+    }
+
+    let config_json = serde_json::to_vec_pretty(&config)
+        .map_err(|error| format!("无法序列化 OSS 配置：{error}"))?;
+    fs::write(oss_sync_config_path(&app)?, config_json)
+        .map_err(|error| format!("无法保存 OSS 配置：{error}"))
+}
+
+#[tauri::command]
+fn load_oss_sync_credentials(app: tauri::AppHandle) -> Result<OssSyncCredentials, String> {
+    let config_path = oss_sync_config_path(&app)?;
+    let mut config: OssSyncConfig = serde_json::from_slice(
+        &fs::read(config_path).map_err(|error| format!("请先保存 OSS 配置：{error}"))?,
+    )
+    .map_err(|error| format!("OSS 配置无效：{error}"))?;
+    config.endpoint = normalize_oss_endpoint(&config.endpoint)?;
+    validate_oss_sync_config(&config)?;
+    let access_key_secret = oss_sync_secret_entry()?
+        .get_password()
+        .map_err(|error| format!("无法读取 OSS 密钥：{error}"))?;
+
+    Ok(OssSyncCredentials {
+        region: config.region,
+        endpoint: config.endpoint,
+        bucket: config.bucket,
+        prefix: config.prefix,
+        access_key_id: config.access_key_id,
+        access_key_secret,
+    })
 }
 
 #[tauri::command]
@@ -659,7 +843,11 @@ pub fn run() {
             create_workspace_directory,
             create_workspace_markdown_file,
             read_workspace_file,
+            read_workspace_sync_file,
             save_workspace_file,
+            load_oss_sync_settings,
+            save_oss_sync_settings,
+            load_oss_sync_credentials,
             open_workspace_entry_in_file_manager,
             read_workspace_image,
             read_workspace_html,
@@ -694,6 +882,28 @@ mod tests {
         assert!(is_office(Path::new("slides.pptx")));
         assert!(!is_office(Path::new("legacy.doc")));
         assert!(!is_office(Path::new("document.pdf")));
+    }
+
+    #[test]
+    fn normalizes_oss_endpoints() {
+        assert_eq!(
+            normalize_oss_endpoint("oss-cn-beijing.aliyuncs.com/").unwrap(),
+            "https://oss-cn-beijing.aliyuncs.com"
+        );
+        assert_eq!(
+            normalize_oss_endpoint("http://localhost:9000/").unwrap(),
+            "http://localhost:9000"
+        );
+        assert!(normalize_oss_endpoint("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn defaults_oss_sync_to_disabled_for_existing_configs() {
+        let config: OssSyncConfig = serde_json::from_str(
+            r#"{"region":"oss-cn-beijing","endpoint":"oss-cn-beijing.aliyuncs.com","bucket":"superwiki","prefix":"superwiki","accessKeyId":"test"}"#,
+        )
+        .unwrap();
+        assert!(!config.enabled);
     }
 
     #[test]

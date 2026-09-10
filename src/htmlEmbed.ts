@@ -10,7 +10,7 @@ const HTML_EMBED_NODE = "html-embed";
 type HtmlEmbedFeatureConfig = {
   uploadHtml: (file: File) => Promise<string>;
   proxyHtml: (source: string) => Promise<string>;
-  onAssetUploaded: () => void;
+  onAssetUploaded: (source?: string) => void;
 };
 
 type MarkdownParent = MarkdownNode & { children?: MarkdownNode[] };
@@ -177,7 +177,7 @@ export function htmlEmbed(editor: Editor, config?: HtmlEmbedFeatureConfig) {
             const nodeType = schema.nodes[HTML_EMBED_NODE];
             if (!nodeType) continue;
             const source = await config.uploadHtml(file);
-            config.onAssetUploaded();
+            config.onAssetUploaded(source);
             nodes.push(nodeType.createAndFill({ src: source, name: file.name }));
           }
           return nodes.filter((node) => node !== null);

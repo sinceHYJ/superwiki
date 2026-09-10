@@ -39,7 +39,15 @@ import { isPlantUmlLanguage } from "./plantumlRenderer";
 import { remarkLineBreak } from "./remarkLineBreak";
 import { remarkVideoEmbed } from "./remarkVideoEmbed";
 import { DEFAULT_CODE_BLOCK_TITLE, extractCodeBlockTitles } from "./codeBlockMetadata";
-import { imageMimeType, proxyWorkspaceImage } from "./workspaceImages";
+import { imageMimeType, proxyWorkspaceImage, resolveWorkspacePath } from "./workspaceImages";
+import {
+  loadOssSyncSettings,
+  saveOssSyncSettings,
+  syncWorkspace,
+  syncWorkspaceFile,
+  testOssSyncConnection,
+  type OssSyncSettings,
+} from "./ossSync";
 import "./App.css";
 
 type FileTreeNode = {
@@ -69,6 +77,16 @@ type ViewMode = "editor" | "preview";
 type WorkspaceView = "document" | "recent" | "favorites";
 type SaveState = "saved" | "saving" | "error";
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
+type SyncState = "idle" | "syncing" | "error";
+
+type OssSyncForm = {
+  region: string;
+  endpoint: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  accessKeySecret: string;
+};
 
 type CursorPosition = {
   line: number;
@@ -127,6 +145,14 @@ const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "coral", name: "珊瑚粉", color: "#fda4af" },
   { id: "lavender", name: "薰衣草紫", color: "#c4b5fd" },
 ];
+const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
+  region: "",
+  endpoint: "",
+  bucket: "",
+  prefix: "superwiki",
+  accessKeyId: "",
+  accessKeySecret: "",
+};
 
 function isThemeColor(value: string | null): value is ThemeColor {
   return THEME_COLORS.some((theme) => theme.id === value);
@@ -164,7 +190,11 @@ function App() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [windowMaximized, setWindowMaximized] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"appearance" | "about">("appearance");
+  const [settingsSection, setSettingsSection] = useState<"appearance" | "sync" | "about">("appearance");
+  const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
+  const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
+  const [syncState, setSyncState] = useState<SyncState>("idle");
+  const [syncMessage, setSyncMessage] = useState("");
   const [appVersion, setAppVersion] = useState("");
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
     const storedTheme = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
@@ -194,6 +224,8 @@ function App() {
   const editorPaneRef = useRef<HTMLElement>(null);
   const previewPaneRef = useRef<HTMLElement>(null);
   const saveTimerRef = useRef<number | null>(null);
+  const syncTimerRef = useRef<number | null>(null);
+  const pendingSyncFilesRef = useRef(new Map<string, Set<string>>());
   const sidebarResizingRef = useRef(false);
 
   const replaceImageUrl = useCallback((url: string | null) => {
@@ -230,6 +262,34 @@ function App() {
     setRecentEditedDocuments(nextDocuments);
   }, []);
 
+  const queueWorkspaceFileSync = useCallback((root: string, path: string) => {
+    if (!ossSyncSettings?.enabled || !ossSyncSettings.hasAccessKeySecret) return;
+
+    const pendingFiles = pendingSyncFilesRef.current.get(root) ?? new Set<string>();
+    pendingFiles.add(path);
+    pendingSyncFilesRef.current.set(root, pendingFiles);
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+
+    syncTimerRef.current = window.setTimeout(() => {
+      syncTimerRef.current = null;
+      const files = [...(pendingSyncFilesRef.current.get(root) ?? [])];
+      pendingSyncFilesRef.current.delete(root);
+      if (!files.length) return;
+
+      setSyncState("syncing");
+      setSyncMessage(`正在同步 ${files.length} 个文件…`);
+      void Promise.all(files.map((filePath) => syncWorkspaceFile(root, filePath)))
+        .then(() => {
+          setSyncState("idle");
+          setSyncMessage(`已同步 ${files.length} 个文件`);
+        })
+        .catch((reason) => {
+          setSyncState("error");
+          setSyncMessage(`同步失败：${String(reason)}`);
+        });
+    }, 2000);
+  }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret]);
+
   const flushPendingSave = useCallback(async () => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
@@ -249,7 +309,8 @@ function App() {
     });
     loadedContent.current = latestContent;
     recordRecentEdit(file);
-  }, [recordRecentEdit, syncEditorContent]);
+    queueWorkspaceFileSync(file.root, file.path);
+  }, [queueWorkspaceFileSync, recordRecentEdit, syncEditorContent]);
 
   const openFile = useCallback(async (file: ActiveFile) => {
     try {
@@ -354,6 +415,27 @@ function App() {
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
   }, []);
 
+  useEffect(() => () => {
+    if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    void loadOssSyncSettings()
+      .then((settings) => {
+        if (!settings) return;
+        setOssSyncSettings(settings);
+        setOssSyncForm({
+          region: settings.region,
+          endpoint: settings.endpoint,
+          bucket: settings.bucket,
+          prefix: settings.prefix,
+          accessKeyId: settings.accessKeyId,
+          accessKeySecret: "",
+        });
+      })
+      .catch((reason) => setError(`无法读取 OSS 配置：${String(reason)}`));
+  }, []);
+
   useEffect(() => {
     if (!directoryContextMenu) return;
 
@@ -425,6 +507,7 @@ function App() {
         });
         loadedContent.current = content;
         recordRecentEdit(activeFile);
+        queueWorkspaceFileSync(activeFile.root, activeFile.path);
         saveTimerRef.current = null;
         setSaveState("saved");
       } catch (reason) {
@@ -437,7 +520,7 @@ function App() {
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
-  }, [activeFile, content, recordRecentEdit]);
+  }, [activeFile, content, queueWorkspaceFileSync, recordRecentEdit]);
 
   const closeWorkspace = async () => {
     try {
@@ -477,14 +560,16 @@ function App() {
     setCursorPosition(position);
   }, []);
 
-  const handleAssetUploaded = useCallback(() => {
-    const root = activeFileRef.current?.root;
-    if (!root) return;
+  const handleAssetUploaded = useCallback((source?: string) => {
+    const file = activeFileRef.current;
+    if (!file) return;
+    const { root } = file;
+    if (source) queueWorkspaceFileSync(root, resolveWorkspacePath(root, file.path, source));
 
     void invoke<WorkspaceTree>("list_workspace", { root })
       .then(setWorkspace)
       .catch((reason) => setError(`无法刷新目录：${String(reason)}`));
-  }, []);
+  }, [queueWorkspaceFileSync]);
 
   const openTreeFile = useCallback((file: FileTreeNode) => {
     if (!workspace) return;
@@ -801,6 +886,86 @@ function App() {
       setError(`已删除${entryLabel}，但无法刷新目录：${String(reason)}`);
     }
   }, [flushPendingSave, replaceImageUrl, workspace]);
+
+  const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
+    setSyncState("syncing");
+    setSyncMessage("正在保存 OSS 配置…");
+    try {
+      await saveOssSyncSettings({ ...ossSyncForm, enabled });
+      const settings = await loadOssSyncSettings();
+      if (!settings) throw new Error("保存后未找到 OSS 配置");
+      setOssSyncSettings(settings);
+      setOssSyncForm((form) => ({ ...form, accessKeySecret: "" }));
+      setSyncState("idle");
+      setSyncMessage("OSS 配置已保存");
+      return true;
+    } catch (reason) {
+      setSyncState("error");
+      setSyncMessage(`保存失败：${String(reason)}`);
+      return false;
+    }
+  };
+
+  const testCurrentOssSyncConnection = async () => {
+    if (!await saveCurrentOssSyncSettings()) return;
+    setSyncState("syncing");
+    setSyncMessage("正在测试 OSS 连接…");
+    try {
+      await testOssSyncConnection();
+      setSyncState("idle");
+      setSyncMessage("OSS 连接正常");
+    } catch (reason) {
+      setSyncState("error");
+      setSyncMessage(`连接失败：${String(reason)}`);
+    }
+  };
+
+  const syncCurrentWorkspace = async () => {
+    if (!workspace) {
+      setSyncState("error");
+      setSyncMessage("请先打开一个笔记文件夹");
+      return;
+    }
+    if (!ossSyncSettings?.hasAccessKeySecret && !await saveCurrentOssSyncSettings()) return;
+
+    setSyncState("syncing");
+    setSyncMessage("正在准备同步…");
+    try {
+      await flushPendingSave();
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
+      const fileCount = await syncWorkspace(tree.root, tree.children);
+      setSyncState("idle");
+      setSyncMessage(`已同步 ${fileCount} 个文件`);
+    } catch (reason) {
+      setSyncState("error");
+      setSyncMessage(`同步失败：${String(reason)}`);
+    }
+  };
+
+  const changeOssSyncEnabled = async (enabled: boolean) => {
+    if (!enabled) {
+      await saveCurrentOssSyncSettings(false);
+      return;
+    }
+    if (!workspace) {
+      setSyncState("error");
+      setSyncMessage("请先打开一个笔记文件夹后再启用同步");
+      return;
+    }
+    if (!await saveCurrentOssSyncSettings(true)) return;
+    setSyncState("syncing");
+    setSyncMessage("正在同步现有文件…");
+    try {
+      await flushPendingSave();
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
+      const fileCount = await syncWorkspace(tree.root, tree.children);
+      setSyncState("idle");
+      setSyncMessage(`同步完成，已同步 ${fileCount} 个文件`);
+    } catch (reason) {
+      setSyncState("error");
+      setSyncMessage(`同步失败：${String(reason)}`);
+    }
+  };
 
   const previewContent = useDeferredValue(content);
   const documentHeadings = useMemo(() => extractDocumentHeadings(previewContent), [previewContent]);
@@ -1476,6 +1641,13 @@ function App() {
                   <Settings size={16} />外观
                 </button>
                 <button
+                  className={settingsSection === "sync" ? "active" : ""}
+                  aria-current={settingsSection === "sync" ? "page" : undefined}
+                  onClick={() => setSettingsSection("sync")}
+                >
+                  <RefreshCw size={16} />同步
+                </button>
+                <button
                   className={settingsSection === "about" ? "active" : ""}
                   aria-current={settingsSection === "about" ? "page" : undefined}
                   onClick={() => setSettingsSection("about")}
@@ -1508,6 +1680,52 @@ function App() {
                       ))}
                     </div>
                   </>
+                ) : settingsSection === "sync" ? (
+                  <div className="oss-sync-section">
+                    <div className="oss-sync-header">
+                      <div className="settings-section-heading">
+                        <h3>阿里云 OSS</h3>
+                        <p>使用静态 AccessKey 将当前笔记文件夹单向上传到 OSS。密钥保存于系统凭据库。</p>
+                      </div>
+                      <label className="oss-sync-enabled">
+                        <input
+                          type="checkbox"
+                          checked={ossSyncSettings?.enabled ?? false}
+                          disabled={syncState === "syncing"}
+                          onChange={(event) => void changeOssSyncEnabled(event.target.checked)}
+                        />
+                        启用
+                      </label>
+                    </div>
+                    <div className="oss-sync-form">
+                      <label>区域
+                        <input value={ossSyncForm.region} placeholder="oss-cn-hangzhou" onChange={(event) => setOssSyncForm((form) => ({ ...form, region: event.target.value }))} />
+                      </label>
+                      <label>Endpoint
+                        <input value={ossSyncForm.endpoint} placeholder="https://oss-cn-hangzhou.aliyuncs.com" onChange={(event) => setOssSyncForm((form) => ({ ...form, endpoint: event.target.value }))} />
+                      </label>
+                      <label>Bucket
+                        <input value={ossSyncForm.bucket} placeholder="my-superwiki-backup" onChange={(event) => setOssSyncForm((form) => ({ ...form, bucket: event.target.value }))} />
+                      </label>
+                      <label>远端目录
+                        <input value={ossSyncForm.prefix} placeholder="superwiki" onChange={(event) => setOssSyncForm((form) => ({ ...form, prefix: event.target.value }))} />
+                      </label>
+                      <label>AccessKey ID
+                        <input value={ossSyncForm.accessKeyId} autoComplete="off" onChange={(event) => setOssSyncForm((form) => ({ ...form, accessKeyId: event.target.value }))} />
+                      </label>
+                      <label>AccessKey Secret
+                        <input type="password" value={ossSyncForm.accessKeySecret} autoComplete="new-password" placeholder={ossSyncSettings?.hasAccessKeySecret ? "已保存；留空则不修改" : "请输入 AccessKey Secret"} onChange={(event) => setOssSyncForm((form) => ({ ...form, accessKeySecret: event.target.value }))} />
+                      </label>
+                    </div>
+                    <div className="oss-sync-actions">
+                      <button onClick={() => void saveCurrentOssSyncSettings()} disabled={syncState === "syncing"}>保存配置</button>
+                      <button onClick={() => void testCurrentOssSyncConnection()} disabled={syncState === "syncing"}>测试连接</button>
+                      <button className="primary" onClick={() => void syncCurrentWorkspace()} disabled={syncState === "syncing"}>立即同步</button>
+                    </div>
+                    <p className={`oss-sync-status ${syncState === "error" ? "error" : ""}`} aria-live="polite">
+                      {syncMessage || "启用后会先同步现有文件，之后在本地写入后自动同步。"}
+                    </p>
+                  </div>
                 ) : (
                   <div className="about-section">
                     <div className="settings-section-heading">

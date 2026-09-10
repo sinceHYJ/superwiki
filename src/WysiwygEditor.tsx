@@ -42,7 +42,7 @@ type WysiwygEditorProps = {
   onChange: (markdown: string) => void;
   onReady: (getMarkdown: (() => string) | null) => void;
   onCursorPositionChange: (position: { line: number; column: number }) => void;
-  onAssetUploaded: () => void;
+  onAssetUploaded: (source?: string) => void;
 };
 
 function scrollTopBarWithMouseWheel(event: WheelEvent) {
@@ -329,7 +329,7 @@ function WysiwygEditorInner({
       .addFeature(imageBlock, {
         onUpload: async (file) => {
           const source = await uploadWorkspaceImage(workspaceRoot, documentPath, file);
-          onAssetUploadedRef.current();
+          onAssetUploadedRef.current(source);
           return source;
         },
         proxyDomURL: (url) => proxyWorkspaceImage(workspaceRoot, documentPath, url, imageUrlCache.current),
@@ -343,7 +343,7 @@ function WysiwygEditorInner({
       .addFeature(htmlEmbed, {
         uploadHtml: (file) => uploadWorkspaceHtml(workspaceRoot, documentPath, file),
         proxyHtml: (source) => proxyWorkspaceHtml(workspaceRoot, documentPath, source, htmlUrlCache.current),
-        onAssetUploaded: () => onAssetUploadedRef.current(),
+        onAssetUploaded: (source) => onAssetUploadedRef.current(source),
       })
       .addFeature(videoEmbed)
       .addFeature(listItem)
