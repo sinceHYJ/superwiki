@@ -521,6 +521,17 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .about-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .about-name { color: #303129; font-size: 15px; font-weight: 650; }
 .about-version { color: #8a8c83; font-size: 12px; font-variant-numeric: tabular-nums; }
+.oss-sync-form { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.oss-sync-form label { display: grid; gap: 6px; color: #5f6259; font-size: 12px; font-weight: 600; }
+.oss-sync-form input { min-width: 0; height: 34px; padding: 0 9px; color: #34352e; font: inherit; font-weight: 400; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
+.oss-sync-form input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
+.oss-sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.oss-sync-actions button { height: 34px; padding: 0 12px; color: #5d6057; font-size: 12px; font-weight: 600; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; cursor: pointer; }
+.oss-sync-actions button:hover:not(:disabled) { background: #f7f7f2; border-color: #b6b8b0; }
+.oss-sync-actions button.primary { color: #fff; background: var(--accent-strong); border-color: var(--accent-strong); }
+.oss-sync-actions button:disabled { cursor: wait; opacity: .55; }
+.oss-sync-status { min-height: 20px; margin: 14px 0 0; color: #71746b; font-size: 12px; line-height: 1.5; }
+.oss-sync-status.error { color: #a13f38; }
 
 @media (max-width: 720px) {
   .settings-backdrop { padding: 20px; }
@@ -528,6 +539,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
   .settings-layout { grid-template-columns: 140px minmax(0, 1fr); }
   .settings-content { padding: 24px 20px; }
   .theme-color-grid { grid-template-columns: 1fr; }
+  .oss-sync-form { grid-template-columns: 1fr; }
 }
 
 /* Notes workspace redesign: visual-only overrides based on the provided demo. */
