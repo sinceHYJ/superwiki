@@ -10,7 +10,7 @@ import { listItem } from "@milkdown/crepe/feature/list-item";
 import { placeholder } from "@milkdown/crepe/feature/placeholder";
 import { table } from "@milkdown/crepe/feature/table";
 import { topBar } from "@milkdown/crepe/feature/top-bar";
-import { editorViewOptionsCtx } from "@milkdown/kit/core";
+import { editorViewCtx, editorViewOptionsCtx } from "@milkdown/kit/core";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
 import { DEFAULT_CODE_BLOCK_TITLE, extractCodeBlockTitles, serializeCodeBlockTitles } from "./codeBlockMetadata";
@@ -41,6 +41,7 @@ type WysiwygEditorProps = {
   initialValue: string;
   onChange: (markdown: string) => void;
   onReady: (getMarkdown: (() => string) | null) => void;
+  onCursorPositionChange: (position: { line: number; column: number }) => void;
   onAssetUploaded: () => void;
 };
 
@@ -121,10 +122,12 @@ function WysiwygEditorInner({
   initialValue,
   onChange,
   onReady,
+  onCursorPositionChange,
   onAssetUploaded,
 }: WysiwygEditorProps) {
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
+  const onCursorPositionChangeRef = useRef(onCursorPositionChange);
   const onAssetUploadedRef = useRef(onAssetUploaded);
   const imageUrlCache = useRef(new Map<string, string>());
   const htmlUrlCache = useRef(new Map<string, string>());
@@ -136,6 +139,10 @@ function WysiwygEditorInner({
   useEffect(() => {
     onReadyRef.current = onReady;
   }, [onReady]);
+
+  useEffect(() => {
+    onCursorPositionChangeRef.current = onCursorPositionChange;
+  }, [onCursorPositionChange]);
 
   useEffect(() => {
     onAssetUploadedRef.current = onAssetUploaded;
@@ -376,7 +383,21 @@ function WysiwygEditorInner({
 
     let topBarElement: HTMLElement | null = null;
     let codeBlockObserver: MutationObserver | null = null;
+    let selectionDocument: Document | null = null;
     const initialTitles = extractCodeBlockTitles(initialValue);
+
+    const updateCursorPosition = () => {
+      const selection = root.ownerDocument.getSelection();
+      if (!selection?.rangeCount || !root.contains(selection.anchorNode)) return;
+
+      const view = crepe.editor.action((ctx) => ctx.get(editorViewCtx));
+      const textBeforeCursor = view.state.doc.textBetween(0, view.state.selection.head, "\n", "\n");
+      const lines = textBeforeCursor.split("\n");
+      onCursorPositionChangeRef.current({
+        line: lines.length,
+        column: Array.from(lines[lines.length - 1] ?? "").length + 1,
+      });
+    };
 
     crepe.on((listener) => {
       listener
@@ -389,6 +410,9 @@ function WysiwygEditorInner({
           proseMirrorElement = root.querySelector<HTMLElement>(".ProseMirror");
           proseMirrorElement?.addEventListener("mousedown", captureVisibleEditorScroll, true);
           proseMirrorElement?.addEventListener("mouseup", restorePointerScroll, true);
+          selectionDocument = root.ownerDocument;
+          selectionDocument.addEventListener("selectionchange", updateCursorPosition);
+          updateCursorPosition();
 
           const decorateCodeBlocks = () => {
             root.querySelectorAll<HTMLElement>(".milkdown-code-block").forEach((block, index) => {
@@ -421,6 +445,8 @@ function WysiwygEditorInner({
           proseMirrorElement?.removeEventListener("mousedown", captureVisibleEditorScroll, true);
           proseMirrorElement?.removeEventListener("mouseup", restorePointerScroll, true);
           proseMirrorElement = null;
+          selectionDocument?.removeEventListener("selectionchange", updateCursorPosition);
+          selectionDocument = null;
           pendingPointerScrollTop = null;
           if (pointerDownRestoreFrame !== null) window.cancelAnimationFrame(pointerDownRestoreFrame);
           pointerDownRestoreFrame = null;

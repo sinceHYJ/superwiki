@@ -70,6 +70,11 @@ type WorkspaceView = "document" | "recent" | "favorites";
 type SaveState = "saved" | "saving" | "error";
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
 
+type CursorPosition = {
+  line: number;
+  column: number;
+};
+
 type DocumentHeading = {
   level: number;
   text: string;
@@ -147,6 +152,7 @@ function App() {
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
   const [content, setContent] = useState("");
+  const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ line: 1, column: 1 });
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [officeData, setOfficeData] = useState<ArrayBuffer | null>(null);
@@ -280,6 +286,7 @@ function App() {
         loadedContent.current = fileContent;
         contentRef.current = fileContent;
         setContent(fileContent);
+        setCursorPosition({ line: 1, column: 1 });
         setEditorVersion((version) => version + 1);
         setViewMode("editor");
         setSaveState("saved");
@@ -464,6 +471,10 @@ function App() {
 
   const handleEditorReady = useCallback((getMarkdown: (() => string) | null) => {
     editorMarkdownRef.current = getMarkdown;
+  }, []);
+
+  const handleCursorPositionChange = useCallback((position: CursorPosition) => {
+    setCursorPosition(position);
   }, []);
 
   const handleAssetUploaded = useCallback(() => {
@@ -793,6 +804,7 @@ function App() {
 
   const previewContent = useDeferredValue(content);
   const documentHeadings = useMemo(() => extractDocumentHeadings(previewContent), [previewContent]);
+  const documentStatistics = useMemo(() => getDocumentStatistics(content), [content]);
 
   const scrollToHeading = useCallback((index: number) => {
     const selector = "h1, h2, h3, h4, h5, h6";
@@ -1383,6 +1395,7 @@ function App() {
                     initialValue={content}
                     onChange={handleEditorChange}
                     onReady={handleEditorReady}
+                    onCursorPositionChange={handleCursorPositionChange}
                     onAssetUploaded={handleAssetUploaded}
                   />
                 </Suspense>
@@ -1406,6 +1419,21 @@ function App() {
               <DocumentOutline headings={documentHeadings} onSelect={scrollToHeading} />
             )}
           </div>
+        )}
+
+        {workspaceView === "document" && activeFile?.kind === "markdown" && (
+          <footer className="document-status-bar" aria-label="文档状态">
+            <div className="document-status-summary">
+              <span>行 {cursorPosition.line}，列 {cursorPosition.column}</span>
+              <span>{documentStatistics.lineCount} 行</span>
+              <span>字数 {documentStatistics.wordCount}</span>
+              <span>{documentStatistics.characterCount} 字符</span>
+            </div>
+            <div className="document-status-format">
+              <span>UTF-8</span>
+              <span>Markdown</span>
+            </div>
+          </footer>
         )}
 
         {workspaceView === "document" && activeFile?.kind === "image" && imageUrl && (
@@ -2128,6 +2156,14 @@ function saveLabel(state: SaveState) {
   if (state === "saving") return "正在保存…";
   if (state === "error") return "保存失败";
   return "已保存";
+}
+
+function getDocumentStatistics(content: string) {
+  return {
+    lineCount: content === "" ? 1 : content.split(/\r\n|\r|\n/).length,
+    wordCount: Array.from(content.matchAll(/[\p{Script=Han}]|[\p{L}\p{N}_]+/gu)).length,
+    characterCount: Array.from(content).length,
+  };
 }
 
 export default App;

@@ -346,6 +346,14 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .editor-pane { overflow: hidden; border-right: 1px solid #e8e8e1; }
 .preview-pane { overflow: auto; }
 .pane-label { position: sticky; z-index: 2; top: 0; height: 34px; padding: 10px 20px 0; color: #aaaDa3; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; background: linear-gradient(#fff 75%, rgba(255,255,255,0)); pointer-events: none; }
+.document-status-bar { display: flex; flex: 0 0 28px; min-width: 0; height: 28px; align-items: center; justify-content: space-between; padding: 0 14px; color: var(--ui-muted, #7d8077); font-size: 11px; font-variant-numeric: tabular-nums; background: var(--ui-surface, #fbfbf8); border-top: 1px solid var(--ui-border, #e5e5de); gap: 16px; }
+.document-status-summary, .document-status-format { display: flex; min-width: 0; align-items: center; gap: 12px; white-space: nowrap; }
+.document-status-summary { overflow: hidden; }
+.document-status-format { flex: 0 0 auto; color: var(--accent-strong); }
+
+@media (max-width: 760px) {
+  .document-status-summary span:nth-child(3) { display: none; }
+}
 
 .document-outline { min-width: 0; min-height: 0; padding: 18px 12px 24px; overflow-y: auto; background: #fbfbf8; border-left: 1px solid #e5e5de; }
 .document-outline-title { padding: 0 10px 10px; color: #777a70; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
