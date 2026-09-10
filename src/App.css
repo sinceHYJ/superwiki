@@ -510,6 +510,15 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .settings-content { min-width: 0; padding: 28px 30px; overflow-y: auto; }
 .settings-section-heading h3 { margin: 0; color: #303129; font-size: 18px; }
 .settings-section-heading p { margin: 7px 0 24px; color: #8a8c83; font-size: 12px; line-height: 1.6; }
+.editor-settings { overflow: hidden; background: #fff; border: 1px solid #dedfd7; border-radius: 9px; }
+.editor-settings-heading { padding: 13px 16px; background: #f7f7f2; border-bottom: 1px solid #e5e5de; }
+.editor-settings-heading h4 { margin: 0; color: #303129; font-size: 13px; font-weight: 650; }
+.editor-setting-row { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 16px; }
+.editor-setting-row > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.editor-setting-row strong { color: #42443d; font-size: 13px; font-weight: 600; }
+.editor-setting-row small { color: #8a8c83; font-size: 11px; line-height: 1.5; }
+.editor-setting-row input { flex: 0 0 76px; width: 76px; height: 34px; box-sizing: border-box; padding: 0 8px; color: #34352e; font-size: 13px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
+.editor-setting-row input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
 .oss-sync-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .oss-sync-header .settings-section-heading { min-width: 0; }
 .theme-color-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }

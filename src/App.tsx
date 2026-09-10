@@ -138,6 +138,8 @@ const FAVORITE_STORAGE_KEY = "superwiki.favoriteDocuments";
 const MAX_RECENT_EDITED_DOCUMENTS = 20;
 const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
 const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
+const OPEN_TAB_LIMIT_STORAGE_KEY = "superwiki.openTabLimit";
+const DEFAULT_OPEN_TAB_LIMIT = 8;
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "yellow", name: "明亮黄", color: "#d9ed72" },
   { id: "sky", name: "天蓝色", color: "oklch(0.6331 0.0643 238.60)" },
@@ -156,6 +158,11 @@ const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
 
 function isThemeColor(value: string | null): value is ThemeColor {
   return THEME_COLORS.some((theme) => theme.id === value);
+}
+
+function readOpenTabLimit() {
+  const storedLimit = Number.parseInt(localStorage.getItem(OPEN_TAB_LIMIT_STORAGE_KEY) ?? "", 10);
+  return Number.isInteger(storedLimit) && storedLimit > 0 ? storedLimit : DEFAULT_OPEN_TAB_LIMIT;
 }
 const DEFAULT_SIDEBAR_WIDTH = 286;
 const MIN_SIDEBAR_WIDTH = 200;
@@ -191,7 +198,8 @@ function App() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [windowMaximized, setWindowMaximized] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"appearance" | "sync" | "about">("appearance");
+  const [settingsSection, setSettingsSection] = useState<"basic" | "appearance" | "sync" | "about">("basic");
+  const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
   const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
   const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
   const [syncState, setSyncState] = useState<SyncState>("idle");
@@ -364,14 +372,14 @@ function App() {
       setActiveFile(file);
       setOpenTabs((current) => current.some((tab) => tab.root === file.root && tab.path === file.path)
         ? current
-        : [...current, file]);
+        : [...current, file].slice(-openTabLimit));
       setWorkspaceView("document");
       return true;
     } catch (reason) {
       setError(String(reason));
       return false;
     }
-  }, [flushPendingSave, replaceImageUrl]);
+  }, [flushPendingSave, openTabLimit, replaceImageUrl]);
 
   const loadWorkspace = useCallback(async (root: string, remember = true) => {
     setWorkspaceLoading(true);
@@ -634,6 +642,32 @@ function App() {
       setError(String(reason));
     }
   }, [flushPendingSave, openFile, openTabs, replaceImageUrl]);
+
+  const changeOpenTabLimit = useCallback(async (limit: number) => {
+    if (!Number.isInteger(limit) || limit < 1) return;
+
+    setOpenTabLimit(limit);
+    localStorage.setItem(OPEN_TAB_LIMIT_STORAGE_KEY, String(limit));
+    if (openTabs.length <= limit) return;
+
+    try {
+      setError("");
+      await flushPendingSave();
+      const remainingTabs = openTabs.slice(-limit);
+      const currentFile = activeFileRef.current;
+      const activeFileRemainsOpen = currentFile && remainingTabs.some((tab) => (
+        tab.root === currentFile.root && tab.path === currentFile.path
+      ));
+
+      if (!activeFileRemainsOpen) {
+        const nextActiveFile = remainingTabs[remainingTabs.length - 1];
+        if (nextActiveFile && !(await openFile(nextActiveFile))) return;
+      }
+      setOpenTabs(remainingTabs);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }, [flushPendingSave, openFile, openTabs]);
 
   const showQuickAccessView = useCallback(async (view: "recent" | "favorites") => {
     if (!workspace) return;
@@ -1775,6 +1809,13 @@ function App() {
             <div className="settings-layout">
               <nav className="settings-nav" aria-label="设置分类">
                 <button
+                  className={settingsSection === "basic" ? "active" : ""}
+                  aria-current={settingsSection === "basic" ? "page" : undefined}
+                  onClick={() => setSettingsSection("basic")}
+                >
+                  <FileCode2 size={16} />基础
+                </button>
+                <button
                   className={settingsSection === "appearance" ? "active" : ""}
                   aria-current={settingsSection === "appearance" ? "page" : undefined}
                   onClick={() => setSettingsSection("appearance")}
@@ -1797,7 +1838,33 @@ function App() {
                 </button>
               </nav>
               <div className="settings-content">
-                {settingsSection === "appearance" ? (
+                {settingsSection === "basic" ? (
+                  <>
+                    <div className="settings-section-heading">
+                      <h3>基础</h3>
+                      <p>配置编辑器的基础使用方式。</p>
+                    </div>
+                    <section className="editor-settings" aria-labelledby="editor-settings-title">
+                      <div className="editor-settings-heading">
+                        <h4 id="editor-settings-title">编辑器</h4>
+                      </div>
+                      <label className="editor-setting-row">
+                        <span>
+                          <strong>打开的 Tab 数量</strong>
+                          <small>超过此数量时，自动关闭最早打开的 Tab。</small>
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={openTabLimit}
+                          aria-label="打开的 Tab 数量"
+                          onChange={(event) => void changeOpenTabLimit(event.currentTarget.valueAsNumber)}
+                        />
+                      </label>
+                    </section>
+                  </>
+                ) : settingsSection === "appearance" ? (
                   <>
                     <div className="settings-section-heading">
                       <h3>外观</h3>
