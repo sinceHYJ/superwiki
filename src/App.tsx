@@ -1238,6 +1238,14 @@ function App() {
           <div className="windows-titlebar-brand">
             <img src="/superwiki-logo.png" alt="" />
             <span>SuperWiki</span>
+            <button
+              className="windows-titlebar-sidebar-toggle"
+              onClick={() => setSidebarOpen(false)}
+              title="收起目录"
+              aria-label="收起目录"
+            >
+              <PanelLeftClose size={15} />
+            </button>
           </div>
           <div className="windows-titlebar-actions">
             <button
@@ -1289,9 +1297,11 @@ function App() {
               <small>{workspace ? "本地工作区" : "尚未选择文件夹"}</small>
             </span>
           </div>
-          <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
-            <PanelLeftClose size={17} />
-          </button>
+          {!IS_WINDOWS && (
+            <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
+              <PanelLeftClose size={17} />
+            </button>
+          )}
         </div>
 
         <div className="document-search-wrap">

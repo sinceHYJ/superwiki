@@ -141,6 +141,7 @@ button { font: inherit; }
 }
 
 .windows-titlebar-settings,
+.windows-titlebar-sidebar-toggle,
 .windows-titlebar-control {
   display: inline-flex;
   height: 32px;
@@ -160,11 +161,17 @@ button { font: inherit; }
   font-size: 12px;
 }
 
+.windows-titlebar-sidebar-toggle {
+  width: 32px;
+  margin-left: 1px;
+}
+
 .windows-titlebar-control {
   width: 46px;
 }
 
 .windows-titlebar-settings:hover,
+.windows-titlebar-sidebar-toggle:hover,
 .windows-titlebar-control:hover {
   color: var(--ui-text);
   background: var(--ui-hover);
