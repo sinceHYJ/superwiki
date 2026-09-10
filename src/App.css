@@ -89,6 +89,9 @@ button { font: inherit; }
   z-index: 9;
   top: 0;
   right: 16px;
+  display: flex;
+  height: 32px;
+  align-items: center;
 }
 
 .windows-titlebar {
@@ -140,7 +143,33 @@ button { font: inherit; }
   gap: 2px;
 }
 
+.titlebar-document-actions {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+.titlebar-document-actions .icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 0;
+}
+
+.titlebar-document-actions .view-switcher {
+  height: 28px;
+  padding: 2px;
+}
+
+.titlebar-document-actions .view-switcher button {
+  min-width: 36px;
+  height: 24px;
+}
+
 .windows-titlebar-settings,
+.windows-titlebar-sidebar-toggle,
+.windows-titlebar-save,
 .windows-titlebar-control {
   display: inline-flex;
   height: 32px;
@@ -160,11 +189,22 @@ button { font: inherit; }
   font-size: 12px;
 }
 
+.windows-titlebar-sidebar-toggle {
+  width: 32px;
+  margin-left: 1px;
+}
+
+.windows-titlebar-save {
+  width: 32px;
+}
+
 .windows-titlebar-control {
   width: 46px;
 }
 
 .windows-titlebar-settings:hover,
+.windows-titlebar-sidebar-toggle:hover,
+.windows-titlebar-save:hover:not(:disabled),
 .windows-titlebar-control:hover {
   color: var(--ui-text);
   background: var(--ui-hover);
@@ -510,6 +550,16 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .settings-content { min-width: 0; padding: 28px 30px; overflow-y: auto; }
 .settings-section-heading h3 { margin: 0; color: #303129; font-size: 18px; }
 .settings-section-heading p { margin: 7px 0 24px; color: #8a8c83; font-size: 12px; line-height: 1.6; }
+.editor-settings { overflow: hidden; background: #fff; border: 1px solid #dedfd7; border-radius: 9px; }
+.editor-settings-heading { padding: 13px 16px; background: #f7f7f2; border-bottom: 1px solid #e5e5de; }
+.editor-settings-heading h4 { margin: 0; color: #303129; font-size: 13px; font-weight: 650; }
+.editor-setting-row { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 16px; }
+.editor-setting-row > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.editor-setting-row strong { color: #42443d; font-size: 13px; font-weight: 600; }
+.editor-setting-row small { color: #8a8c83; font-size: 11px; line-height: 1.5; }
+.editor-setting-row input[type="number"] { flex: 0 0 76px; width: 76px; height: 34px; box-sizing: border-box; padding: 0 8px; color: #34352e; font-size: 13px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
+.editor-setting-row input[type="number"]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
+.editor-setting-row input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); cursor: pointer; }
 .oss-sync-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .oss-sync-header .settings-section-heading { min-width: 0; }
 .theme-color-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -603,6 +653,11 @@ body {
   border: 0;
   border-radius: 9px;
   box-shadow: none;
+}
+
+.windows-titlebar-save:disabled {
+  cursor: default;
+  opacity: .4;
 }
 
 .library-name {
@@ -1529,4 +1584,112 @@ button.folder-placeholder:hover {
 .preview-code-block.is-wrapped pre code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.tab-bar {
+  flex: 0 0 39px;
+  min-width: 0;
+  height: 39px;
+  overflow: hidden;
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.tab-list {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 100%;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tab-list::-webkit-scrollbar {
+  display: none;
+}
+
+.file-tab {
+  display: flex;
+  flex: 0 0 auto;
+  max-width: 210px;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  color: var(--ui-muted);
+  background: transparent;
+  border-right: 1px solid var(--ui-border);
+  border-bottom: 2px solid transparent;
+}
+
+.file-tab:first-child {
+  border-left: 1px solid var(--ui-border);
+}
+
+.file-tab.active {
+  color: var(--ui-text);
+  background: var(--ui-canvas);
+  border-bottom-color: var(--accent-primary);
+}
+
+.file-tab-select,
+.file-tab-close {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.file-tab-select {
+  min-width: 0;
+  gap: 7px;
+  height: 100%;
+  padding: 0 8px 0 10px;
+  font-size: 12px;
+}
+
+.file-tab-select svg {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+}
+
+.file-tab-select span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tab-unsaved {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4caf70;
+}
+
+.file-tab-close {
+  flex: 0 0 28px;
+  height: 28px;
+  justify-content: center;
+  margin-right: 3px;
+  border-radius: 5px;
+}
+
+.file-tab-close:hover {
+  color: var(--ui-text);
+  background: var(--ui-hover);
+}
+
+.file-tab-select:focus-visible,
+.file-tab-close:focus-visible {
+  outline: 2px solid var(--accent-medium);
+  outline-offset: -2px;
+}
+
+.document-fullscreen .tab-bar {
+  display: none;
 }

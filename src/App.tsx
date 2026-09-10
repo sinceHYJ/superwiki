@@ -1,5 +1,5 @@
 import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -22,6 +22,7 @@ import {
   PanelRightClose,
   Pencil,
   RefreshCw,
+  Save,
   Search,
   Square,
   Settings,
@@ -131,6 +132,7 @@ type FavoriteDocument = {
 };
 
 type FavoriteStorage = Record<string, FavoriteDocument[]>;
+type DocumentDrafts = Record<string, string>;
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
 const RECENT_EDITED_STORAGE_KEY = "superwiki.recentEditedDocuments";
@@ -138,6 +140,9 @@ const FAVORITE_STORAGE_KEY = "superwiki.favoriteDocuments";
 const MAX_RECENT_EDITED_DOCUMENTS = 20;
 const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
 const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
+const OPEN_TAB_LIMIT_STORAGE_KEY = "superwiki.openTabLimit";
+const AUTO_SAVE_STORAGE_KEY = "superwiki.autoSave";
+const DEFAULT_OPEN_TAB_LIMIT = 8;
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "yellow", name: "明亮黄", color: "#d9ed72" },
   { id: "sky", name: "天蓝色", color: "oklch(0.6331 0.0643 238.60)" },
@@ -157,6 +162,19 @@ const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
 function isThemeColor(value: string | null): value is ThemeColor {
   return THEME_COLORS.some((theme) => theme.id === value);
 }
+
+function readOpenTabLimit() {
+  const storedLimit = Number.parseInt(localStorage.getItem(OPEN_TAB_LIMIT_STORAGE_KEY) ?? "", 10);
+  return Number.isInteger(storedLimit) && storedLimit > 0 ? storedLimit : DEFAULT_OPEN_TAB_LIMIT;
+}
+
+function readAutoSave() {
+  return localStorage.getItem(AUTO_SAVE_STORAGE_KEY) !== "false";
+}
+
+function documentDraftKey(file: Pick<ActiveFile, "root" | "path">) {
+  return `${file.root}:${file.path}`;
+}
 const DEFAULT_SIDEBAR_WIDTH = 286;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
@@ -173,24 +191,28 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
+  const [openTabs, setOpenTabs] = useState<ActiveFile[]>([]);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("document");
   const [recentEditedDocuments, setRecentEditedDocuments] = useState<RecentEditedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
   const [content, setContent] = useState("");
+  const [documentDrafts, setDocumentDrafts] = useState<DocumentDrafts>({});
   const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ line: 1, column: 1 });
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [officeData, setOfficeData] = useState<ArrayBuffer | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
-  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [documentFullscreen, setDocumentFullscreen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [windowMaximized, setWindowMaximized] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"appearance" | "sync" | "about">("appearance");
+  const [settingsSection, setSettingsSection] = useState<"basic" | "appearance" | "sync" | "about">("basic");
+  const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
+  const [autoSave, setAutoSave] = useState(readAutoSave);
   const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
   const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
   const [syncState, setSyncState] = useState<SyncState>("idle");
@@ -221,6 +243,7 @@ function App() {
   const contentRef = useRef("");
   const imageUrlRef = useRef<string | null>(null);
   const editorMarkdownRef = useRef<(() => string) | null>(null);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
   const editorPaneRef = useRef<HTMLElement>(null);
   const previewPaneRef = useRef<HTMLElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -290,11 +313,13 @@ function App() {
     }, 2000);
   }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret]);
 
-  const flushPendingSave = useCallback(async () => {
+  const flushPendingSave = useCallback(async (force = false) => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+
+    if (!force && !autoSave) return;
 
     const file = activeFileRef.current;
     if (!file || file.kind !== "markdown") return;
@@ -308,13 +333,35 @@ function App() {
       content: latestContent,
     });
     loadedContent.current = latestContent;
+    setDocumentDrafts((drafts) => {
+      const nextDrafts = { ...drafts };
+      delete nextDrafts[documentDraftKey(file)];
+      return nextDrafts;
+    });
     recordRecentEdit(file);
     queueWorkspaceFileSync(file.root, file.path);
-  }, [queueWorkspaceFileSync, recordRecentEdit, syncEditorContent]);
+  }, [autoSave, queueWorkspaceFileSync, recordRecentEdit, syncEditorContent]);
+
+  const saveCurrentFile = useCallback(async () => {
+    try {
+      setError("");
+      setSaveState("saving");
+      await flushPendingSave(true);
+      setSaveState("saved");
+    } catch (reason) {
+      setSaveState("error");
+      setError(String(reason));
+    }
+  }, [flushPendingSave]);
 
   const openFile = useCallback(async (file: ActiveFile) => {
     try {
       setError("");
+      const currentFile = activeFileRef.current;
+      if (currentFile?.root === file.root && currentFile.path === file.path) {
+        setWorkspaceView("document");
+        return true;
+      }
       await flushPendingSave();
 
       if (file.kind === "image") {
@@ -344,9 +391,10 @@ function App() {
         });
         replaceImageUrl(null);
         setOfficeData(null);
+        const draft = documentDrafts[documentDraftKey(file)];
         loadedContent.current = fileContent;
-        contentRef.current = fileContent;
-        setContent(fileContent);
+        contentRef.current = draft ?? fileContent;
+        setContent(draft ?? fileContent);
         setCursorPosition({ line: 1, column: 1 });
         setEditorVersion((version) => version + 1);
         setViewMode("editor");
@@ -355,13 +403,16 @@ function App() {
 
       activeFileRef.current = file;
       setActiveFile(file);
+      setOpenTabs((current) => current.some((tab) => tab.root === file.root && tab.path === file.path)
+        ? current
+        : [...current, file].slice(-openTabLimit));
       setWorkspaceView("document");
       return true;
     } catch (reason) {
       setError(String(reason));
       return false;
     }
-  }, [flushPendingSave, replaceImageUrl]);
+  }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
   const loadWorkspace = useCallback(async (root: string, remember = true) => {
     setWorkspaceLoading(true);
@@ -402,6 +453,8 @@ function App() {
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
+      setOpenTabs([]);
+      setDocumentDrafts({});
       setContent("");
       replaceImageUrl(null);
       setOfficeData(null);
@@ -466,6 +519,11 @@ function App() {
   }, [activeFile?.kind]);
 
   useEffect(() => {
+    if (workspaceView !== "document" || !activeFile) return;
+    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeFile, workspaceView]);
+
+  useEffect(() => {
     let cancelled = false;
     void getVersion()
       .then((version) => {
@@ -495,7 +553,7 @@ function App() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    if (!activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
+    if (!autoSave || !activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
 
     setSaveState("saving");
     saveTimerRef.current = window.setTimeout(async () => {
@@ -506,6 +564,11 @@ function App() {
           content,
         });
         loadedContent.current = content;
+        setDocumentDrafts((drafts) => {
+          const nextDrafts = { ...drafts };
+          delete nextDrafts[documentDraftKey(activeFile)];
+          return nextDrafts;
+        });
         recordRecentEdit(activeFile);
         queueWorkspaceFileSync(activeFile.root, activeFile.path);
         saveTimerRef.current = null;
@@ -520,7 +583,7 @@ function App() {
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
-  }, [activeFile, content, queueWorkspaceFileSync, recordRecentEdit]);
+  }, [activeFile, autoSave, content, queueWorkspaceFileSync, recordRecentEdit]);
 
   const closeWorkspace = async () => {
     try {
@@ -536,6 +599,8 @@ function App() {
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
+      setOpenTabs([]);
+      setDocumentDrafts({});
       setContent("");
       replaceImageUrl(null);
       setOfficeData(null);
@@ -548,6 +613,16 @@ function App() {
   };
 
   const handleEditorChange = useCallback((value: string) => {
+    const file = activeFileRef.current;
+    if (file?.kind === "markdown") {
+      setDocumentDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        const key = documentDraftKey(file);
+        if (value === loadedContent.current) delete nextDrafts[key];
+        else nextDrafts[key] = value;
+        return nextDrafts;
+      });
+    }
     contentRef.current = value;
     setContent(value);
   }, []);
@@ -580,6 +655,79 @@ function App() {
       kind: file.isImage ? "image" : file.isOffice ? "office" : "markdown",
     });
   }, [openFile, workspace]);
+
+  const closeTab = useCallback(async (tab: ActiveFile) => {
+    const tabIndex = openTabs.findIndex((item) => item.root === tab.root && item.path === tab.path);
+    if (tabIndex === -1) return;
+
+    const currentFile = activeFileRef.current;
+    const closesActiveFile = currentFile?.root === tab.root && currentFile.path === tab.path;
+    if (!closesActiveFile) {
+      setOpenTabs((current) => current.filter((item) => item.root !== tab.root || item.path !== tab.path));
+      setDocumentDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[documentDraftKey(tab)];
+        return nextDrafts;
+      });
+      return;
+    }
+
+    try {
+      setError("");
+      await flushPendingSave();
+      setDocumentDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[documentDraftKey(tab)];
+        return nextDrafts;
+      });
+      const remainingTabs = openTabs.filter((item) => item.root !== tab.root || item.path !== tab.path);
+      const nextActiveFile = remainingTabs[tabIndex] ?? remainingTabs[tabIndex - 1] ?? null;
+
+      if (nextActiveFile && !(await openFile(nextActiveFile))) return;
+
+      setOpenTabs(remainingTabs);
+      if (nextActiveFile) return;
+
+      activeFileRef.current = null;
+      editorMarkdownRef.current = null;
+      loadedContent.current = "";
+      contentRef.current = "";
+      setActiveFile(null);
+      setContent("");
+      replaceImageUrl(null);
+      setOfficeData(null);
+      setSaveState("saved");
+      setWorkspaceView("document");
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }, [flushPendingSave, openFile, openTabs, replaceImageUrl]);
+
+  const changeOpenTabLimit = useCallback(async (limit: number) => {
+    if (!Number.isInteger(limit) || limit < 1) return;
+
+    setOpenTabLimit(limit);
+    localStorage.setItem(OPEN_TAB_LIMIT_STORAGE_KEY, String(limit));
+    if (openTabs.length <= limit) return;
+
+    try {
+      setError("");
+      await flushPendingSave();
+      const remainingTabs = openTabs.slice(-limit);
+      const currentFile = activeFileRef.current;
+      const activeFileRemainsOpen = currentFile && remainingTabs.some((tab) => (
+        tab.root === currentFile.root && tab.path === currentFile.path
+      ));
+
+      if (!activeFileRemainsOpen) {
+        const nextActiveFile = remainingTabs[remainingTabs.length - 1];
+        if (nextActiveFile && !(await openFile(nextActiveFile))) return;
+      }
+      setOpenTabs(remainingTabs);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }, [flushPendingSave, openFile, openTabs]);
 
   const showQuickAccessView = useCallback(async (view: "recent" | "favorites") => {
     if (!workspace) return;
@@ -774,6 +922,22 @@ function App() {
         setActiveFile(updatedFile);
       }
 
+      setOpenTabs((current) => current.map((file) => {
+        const affected = node.isDir
+          ? isPathInsideDirectory(file.path, node.path)
+          : file.path === node.path;
+        if (!affected) return file;
+
+        const nextPath = node.isDir
+          ? replaceDirectoryPath(file.path, node.path, renamedPath)
+          : renamedPath;
+        return {
+          ...file,
+          path: nextPath,
+          name: pathFileName(nextPath),
+        };
+      }));
+
       const renamedRecentDocuments = readRecentEditedDocuments(workspace.root).map((document) => {
         const affected = node.isDir
           ? isPathInsideDirectory(document.path, node.path)
@@ -836,6 +1000,17 @@ function App() {
       const currentFile = activeFileRef.current;
       const deletesCurrentFile = currentFile
         && (currentFile.path === node.path || (node.isDir && isPathInsideDirectory(currentFile.path, node.path)));
+      const currentTabIndex = currentFile
+        ? openTabs.findIndex((tab) => tab.root === currentFile.root && tab.path === currentFile.path)
+        : -1;
+      const remainingTabs = openTabs.filter((tab) => (
+        node.isDir
+          ? !isPathInsideDirectory(tab.path, node.path)
+          : tab.path !== node.path
+      ));
+      const nextActiveFile = deletesCurrentFile
+        ? remainingTabs[currentTabIndex] ?? remainingTabs[currentTabIndex - 1] ?? null
+        : null;
       if (deletesCurrentFile) await flushPendingSave();
 
       await invoke(node.isDir ? "delete_workspace_directory" : "delete_workspace_file", {
@@ -871,6 +1046,9 @@ function App() {
         setSaveState("saved");
         setWorkspaceView("document");
       }
+      setOpenTabs(remainingTabs);
+
+      if (nextActiveFile) await openFile(nextActiveFile);
 
       setCreatingEntry(null);
       setRenamingPath(null);
@@ -885,7 +1063,7 @@ function App() {
     } catch (reason) {
       setError(`已删除${entryLabel}，但无法刷新目录：${String(reason)}`);
     }
-  }, [flushPendingSave, replaceImageUrl, workspace]);
+  }, [flushPendingSave, openFile, openTabs, replaceImageUrl, workspace]);
 
   const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
     setSyncState("syncing");
@@ -1055,9 +1233,21 @@ function App() {
     void getCurrentWindow().startDragging();
   };
 
-  const activeRelativePath = activeFile
-    ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
-    : null;
+  const handleTabListWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    const tabList = event.currentTarget;
+    if (tabList.scrollWidth <= tabList.clientWidth) return;
+
+    const delta = event.shiftKey ? event.deltaX || event.deltaY : event.deltaY;
+    if (!delta) return;
+
+    const maxScrollLeft = tabList.scrollWidth - tabList.clientWidth;
+    const nextScrollLeft = Math.min(maxScrollLeft, Math.max(0, tabList.scrollLeft + delta));
+    if (nextScrollLeft === tabList.scrollLeft) return;
+
+    tabList.scrollLeft = nextScrollLeft;
+    event.preventDefault();
+  }, []);
+
   const documentViewActivePath = workspaceView === "document" ? activeFile?.path ?? null : null;
   const normalizedDocumentSearchQuery = documentSearchQuery.trim().toLocaleLowerCase();
   const documentSearchResults = useMemo(
@@ -1068,6 +1258,40 @@ function App() {
   );
   const activeFileFavorited = activeFile?.kind === "markdown"
     && favoriteDocuments.some((document) => document.path === activeFile.path);
+  const titlebarDocumentActions = workspaceView === "document" && activeFile?.kind === "markdown" && (
+    <div className="titlebar-document-actions">
+      <button
+        className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
+        onClick={toggleActiveFileFavorite}
+        title={activeFileFavorited ? "取消收藏" : "收藏文档"}
+        aria-label={activeFileFavorited ? "取消收藏" : "收藏文档"}
+        aria-pressed={activeFileFavorited}
+      >
+        <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
+      </button>
+      <div className="view-switcher" aria-label="视图模式">
+        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
+        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
+      </div>
+      <button
+        className="icon-button document-fullscreen-toggle"
+        onClick={() => void enterDocumentFullscreen()}
+        title="只读全屏（Esc 退出）"
+        aria-label="只读全屏（Esc 退出）"
+      >
+        <Maximize2 size={18} />
+      </button>
+      <button
+        className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
+        onClick={() => setOutlineOpen((value) => !value)}
+        title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+        aria-label={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+        aria-pressed={!outlineOpen}
+      >
+        <PanelRightClose size={18} />
+      </button>
+    </div>
+  );
 
   return (
     <main
@@ -1079,6 +1303,7 @@ function App() {
         <>
           <div className="window-titlebar-drag-region" onMouseDown={handleTitlebarMouseDown} />
           <div className="window-titlebar-actions">
+            {titlebarDocumentActions}
             <button
               className="settings-button"
               onClick={() => setSettingsOpen(true)}
@@ -1105,8 +1330,26 @@ function App() {
           <div className="windows-titlebar-brand">
             <img src="/superwiki-logo.png" alt="" />
             <span>SuperWiki</span>
+            <button
+              className="windows-titlebar-sidebar-toggle"
+              onClick={() => setSidebarOpen(false)}
+              title="收起目录"
+              aria-label="收起目录"
+            >
+              <PanelLeftClose size={15} />
+            </button>
+            <button
+              className="windows-titlebar-save"
+              onClick={() => void saveCurrentFile()}
+              title="保存当前文档"
+              aria-label="保存当前文档"
+              disabled={workspaceView !== "document" || activeFile?.kind !== "markdown"}
+            >
+              <Save size={15} />
+            </button>
           </div>
           <div className="windows-titlebar-actions">
+            {titlebarDocumentActions}
             <button
               className="windows-titlebar-settings"
               onClick={() => setSettingsOpen(true)}
@@ -1156,9 +1399,11 @@ function App() {
               <small>{workspace ? "本地工作区" : "尚未选择文件夹"}</small>
             </span>
           </div>
-          <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
-            <PanelLeftClose size={17} />
-          </button>
+          {!IS_WINDOWS && (
+            <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
+              <PanelLeftClose size={17} />
+            </button>
+          )}
         </div>
 
         <div className="document-search-wrap">
@@ -1386,69 +1631,49 @@ function App() {
       )}
 
       <section className="workspace">
-        <header className="toolbar">
-          <div className="document-title">
-            <button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen((value) => !value)} title="切换目录">
-              <PanelLeftClose size={18} />
-            </button>
-            <img className="toolbar-logo" src="/superwiki-logo.png" alt="" />
-            <div className="document-heading">
-              <h1>{workspaceView === "recent"
-                ? "最近编辑"
-                : workspaceView === "favorites"
-                  ? "我的收藏"
-                  : activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
-              {workspaceView !== "document" ? (
-                <div className="document-meta">
-                  {workspaceView === "recent" ? "最近成功编辑的 Markdown 文档" : "收藏的 Markdown 文档"}
-                </div>
-              ) : activeFile && activeRelativePath && (
-                <div className="document-meta">
-                  <span className="document-path" title={activeRelativePath}>{activeRelativePath}</span>
-                  <span className="meta-separator">·</span>
-                  {activeFile.kind === "markdown" && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
-                  {activeFile.kind === "image" && <span className="readonly-state">图片预览 · 只读</span>}
-                  {activeFile.kind === "office" && <span className="readonly-state">Office 预览 · 只读</span>}
-                </div>
-              )}
+        {openTabs.length > 0 && (
+          <nav className="tab-bar" aria-label="已打开文件">
+            <div className="tab-list" role="tablist" onWheel={handleTabListWheel}>
+              {openTabs.map((tab) => {
+                const isActive = workspaceView === "document"
+                  && activeFile?.root === tab.root
+                  && activeFile.path === tab.path;
+                const hasUnsavedChanges = tab.kind === "markdown" && documentDraftKey(tab) in documentDrafts;
+                const tabPath = workspaceRelativePath(tab.root, tab.path, tab.name);
+                return (
+                  <div key={`${tab.root}:${tab.path}`} className={`file-tab ${isActive ? "active" : ""}`}>
+                    <button
+                      className="file-tab-select"
+                      type="button"
+                      ref={isActive ? activeTabRef : null}
+                      role="tab"
+                      aria-selected={isActive}
+                      title={tabPath}
+                      onClick={() => void openFile(tab)}
+                    >
+                      {tab.kind === "markdown"
+                        ? <FileCode2 size={14} />
+                        : tab.kind === "image"
+                          ? <ImageIcon size={14} />
+                          : <File size={14} />}
+                      <span>{tab.name}</span>
+                      {hasUnsavedChanges && <span className="file-tab-unsaved" aria-label="有未保存的修改" />}
+                    </button>
+                    <button
+                      className="file-tab-close"
+                      type="button"
+                      title={`关闭 ${tab.name}`}
+                      aria-label={`关闭 ${tab.name}`}
+                      onClick={() => void closeTab(tab)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-
-        {workspaceView === "document" && activeFile?.kind === "markdown" && (
-            <div className="toolbar-actions">
-              <button
-                className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
-                onClick={toggleActiveFileFavorite}
-                title={activeFileFavorited ? "取消收藏" : "收藏文档"}
-                aria-label={activeFileFavorited ? "取消收藏" : "收藏文档"}
-                aria-pressed={activeFileFavorited}
-              >
-                <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
-              </button>
-              <div className="view-switcher" aria-label="视图模式">
-                <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
-                <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
-              </div>
-              <button
-                className="icon-button document-fullscreen-toggle"
-                onClick={() => void enterDocumentFullscreen()}
-                title="只读全屏（Esc 退出）"
-                aria-label="只读全屏（Esc 退出）"
-              >
-                <Maximize2 size={18} />
-              </button>
-              <button
-                className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
-                onClick={() => setOutlineOpen((value) => !value)}
-                title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
-                aria-label={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
-                aria-pressed={!outlineOpen}
-              >
-                <PanelRightClose size={18} />
-              </button>
-            </div>
-          )}
-        </header>
+          </nav>
+        )}
 
         {error && <div className="error-banner">{error}</div>}
 
@@ -1634,6 +1859,13 @@ function App() {
             <div className="settings-layout">
               <nav className="settings-nav" aria-label="设置分类">
                 <button
+                  className={settingsSection === "basic" ? "active" : ""}
+                  aria-current={settingsSection === "basic" ? "page" : undefined}
+                  onClick={() => setSettingsSection("basic")}
+                >
+                  <FileCode2 size={16} />基础
+                </button>
+                <button
                   className={settingsSection === "appearance" ? "active" : ""}
                   aria-current={settingsSection === "appearance" ? "page" : undefined}
                   onClick={() => setSettingsSection("appearance")}
@@ -1656,7 +1888,54 @@ function App() {
                 </button>
               </nav>
               <div className="settings-content">
-                {settingsSection === "appearance" ? (
+                {settingsSection === "basic" ? (
+                  <>
+                    <div className="settings-section-heading">
+                      <h3>基础</h3>
+                      <p>配置编辑器的基础使用方式。</p>
+                    </div>
+                    <section className="editor-settings" aria-labelledby="editor-settings-title">
+                      <div className="editor-settings-heading">
+                        <h4 id="editor-settings-title">编辑器</h4>
+                      </div>
+                      <label className="editor-setting-row">
+                        <span>
+                          <strong>打开的 Tab 数量</strong>
+                          <small>超过此数量时，自动关闭最早打开的 Tab。</small>
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={openTabLimit}
+                          aria-label="打开的 Tab 数量"
+                          onChange={(event) => void changeOpenTabLimit(event.currentTarget.valueAsNumber)}
+                        />
+                      </label>
+                      <label className="editor-setting-row">
+                        <span>
+                          <strong>自动保存</strong>
+                          <small>关闭后仅在点击顶部保存按钮时写入当前文档。</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={autoSave}
+                          aria-label="自动保存"
+                          onChange={(event) => {
+                            const enabled = event.target.checked;
+                            setAutoSave(enabled);
+                            localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(enabled));
+                            if (!enabled && saveTimerRef.current !== null) {
+                              window.clearTimeout(saveTimerRef.current);
+                              saveTimerRef.current = null;
+                              setSaveState("saved");
+                            }
+                          }}
+                        />
+                      </label>
+                    </section>
+                  </>
+                ) : settingsSection === "appearance" ? (
                   <>
                     <div className="settings-section-heading">
                       <h3>外观</h3>
@@ -2368,12 +2647,6 @@ function workspaceRelativePath(root: string, path: string, fallbackName: string)
   const normalizedPath = path.replace(/\\/g, "/");
   const prefix = `${normalizedRoot}/`;
   return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : fallbackName;
-}
-
-function saveLabel(state: SaveState) {
-  if (state === "saving") return "正在保存…";
-  if (state === "error") return "保存失败";
-  return "已保存";
 }
 
 function getDocumentStatistics(content: string) {
