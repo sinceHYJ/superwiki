@@ -263,7 +263,7 @@ function App() {
   }, []);
 
   const queueWorkspaceFileSync = useCallback((root: string, path: string) => {
-    if (!ossSyncSettings?.hasAccessKeySecret) return;
+    if (!ossSyncSettings?.enabled || !ossSyncSettings.hasAccessKeySecret) return;
 
     const pendingFiles = pendingSyncFilesRef.current.get(root) ?? new Set<string>();
     pendingFiles.add(path);
@@ -288,7 +288,7 @@ function App() {
           setSyncMessage(`同步失败：${String(reason)}`);
         });
     }, 2000);
-  }, [ossSyncSettings?.hasAccessKeySecret]);
+  }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret]);
 
   const flushPendingSave = useCallback(async () => {
     if (saveTimerRef.current !== null) {
@@ -887,11 +887,11 @@ function App() {
     }
   }, [flushPendingSave, replaceImageUrl, workspace]);
 
-  const saveCurrentOssSyncSettings = async () => {
+  const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
     setSyncState("syncing");
     setSyncMessage("正在保存 OSS 配置…");
     try {
-      await saveOssSyncSettings(ossSyncForm);
+      await saveOssSyncSettings({ ...ossSyncForm, enabled });
       const settings = await loadOssSyncSettings();
       if (!settings) throw new Error("保存后未找到 OSS 配置");
       setOssSyncSettings(settings);
@@ -936,6 +936,31 @@ function App() {
       const fileCount = await syncWorkspace(tree.root, tree.children);
       setSyncState("idle");
       setSyncMessage(`已同步 ${fileCount} 个文件`);
+    } catch (reason) {
+      setSyncState("error");
+      setSyncMessage(`同步失败：${String(reason)}`);
+    }
+  };
+
+  const changeOssSyncEnabled = async (enabled: boolean) => {
+    if (!enabled) {
+      await saveCurrentOssSyncSettings(false);
+      return;
+    }
+    if (!workspace) {
+      setSyncState("error");
+      setSyncMessage("请先打开一个笔记文件夹后再启用同步");
+      return;
+    }
+    if (!await saveCurrentOssSyncSettings(true)) return;
+    setSyncState("syncing");
+    setSyncMessage("正在同步现有文件…");
+    try {
+      await flushPendingSave();
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
+      const fileCount = await syncWorkspace(tree.root, tree.children);
+      setSyncState("idle");
+      setSyncMessage(`同步完成，已同步 ${fileCount} 个文件`);
     } catch (reason) {
       setSyncState("error");
       setSyncMessage(`同步失败：${String(reason)}`);
@@ -1657,9 +1682,20 @@ function App() {
                   </>
                 ) : settingsSection === "sync" ? (
                   <div className="oss-sync-section">
-                    <div className="settings-section-heading">
-                      <h3>阿里云 OSS</h3>
-                      <p>使用静态 AccessKey 将当前笔记文件夹单向上传到 OSS。密钥保存于系统凭据库。</p>
+                    <div className="oss-sync-header">
+                      <div className="settings-section-heading">
+                        <h3>阿里云 OSS</h3>
+                        <p>使用静态 AccessKey 将当前笔记文件夹单向上传到 OSS。密钥保存于系统凭据库。</p>
+                      </div>
+                      <label className="oss-sync-enabled">
+                        <input
+                          type="checkbox"
+                          checked={ossSyncSettings?.enabled ?? false}
+                          disabled={syncState === "syncing"}
+                          onChange={(event) => void changeOssSyncEnabled(event.target.checked)}
+                        />
+                        启用
+                      </label>
                     </div>
                     <div className="oss-sync-form">
                       <label>区域
@@ -1687,7 +1723,7 @@ function App() {
                       <button className="primary" onClick={() => void syncCurrentWorkspace()} disabled={syncState === "syncing"}>立即同步</button>
                     </div>
                     <p className={`oss-sync-status ${syncState === "error" ? "error" : ""}`} aria-live="polite">
-                      {syncMessage || "保存成功后，Markdown 和资源文件会在本地写入后自动同步。"}
+                      {syncMessage || "启用后会先同步现有文件，之后在本地写入后自动同步。"}
                     </p>
                   </div>
                 ) : (

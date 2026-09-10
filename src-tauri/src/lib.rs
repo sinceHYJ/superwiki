@@ -42,6 +42,8 @@ struct OssSyncConfig {
     bucket: String,
     prefix: String,
     access_key_id: String,
+    #[serde(default)]
+    enabled: bool,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +55,7 @@ struct OssSyncSettingsInput {
     prefix: String,
     access_key_id: String,
     access_key_secret: Option<String>,
+    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -64,6 +67,7 @@ struct OssSyncSettings {
     prefix: String,
     access_key_id: String,
     has_access_key_secret: bool,
+    enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -483,6 +487,7 @@ fn load_oss_sync_settings(app: tauri::AppHandle) -> Result<Option<OssSyncSetting
         prefix: config.prefix,
         access_key_id: config.access_key_id,
         has_access_key_secret,
+        enabled: config.enabled,
     }))
 }
 
@@ -497,6 +502,7 @@ fn save_oss_sync_settings(
         bucket: settings.bucket.trim().to_string(),
         prefix: normalize_oss_prefix(&settings.prefix)?,
         access_key_id: settings.access_key_id.trim().to_string(),
+        enabled: settings.enabled,
     };
     validate_oss_sync_config(&config)?;
 
@@ -889,6 +895,15 @@ mod tests {
             "http://localhost:9000"
         );
         assert!(normalize_oss_endpoint("ftp://example.com").is_err());
+    }
+
+    #[test]
+    fn defaults_oss_sync_to_disabled_for_existing_configs() {
+        let config: OssSyncConfig = serde_json::from_str(
+            r#"{"region":"oss-cn-beijing","endpoint":"oss-cn-beijing.aliyuncs.com","bucket":"superwiki","prefix":"superwiki","accessKeyId":"test"}"#,
+        )
+        .unwrap();
+        assert!(!config.enabled);
     }
 
     #[test]

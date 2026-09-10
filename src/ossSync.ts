@@ -8,6 +8,7 @@ export type OssSyncSettings = {
   prefix: string;
   accessKeyId: string;
   hasAccessKeySecret: boolean;
+  enabled: boolean;
 };
 
 type OssSyncCredentials = Omit<OssSyncSettings, "hasAccessKeySecret"> & {

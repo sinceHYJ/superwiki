@@ -510,6 +510,8 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .settings-content { min-width: 0; padding: 28px 30px; overflow-y: auto; }
 .settings-section-heading h3 { margin: 0; color: #303129; font-size: 18px; }
 .settings-section-heading p { margin: 7px 0 24px; color: #8a8c83; font-size: 12px; line-height: 1.6; }
+.oss-sync-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.oss-sync-header .settings-section-heading { min-width: 0; }
 .theme-color-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .theme-color-option { display: flex; align-items: center; gap: 11px; min-width: 0; height: 52px; padding: 0 13px; color: #42443d; font-size: 13px; text-align: left; background: #fff; border: 1px solid #dedfd7; border-radius: 9px; cursor: pointer; }
 .theme-color-option:hover { border-color: #b6b8b0; background: #fbfbf8; }
@@ -525,6 +527,9 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .oss-sync-form label { display: grid; gap: 6px; color: #5f6259; font-size: 12px; font-weight: 600; }
 .oss-sync-form input { min-width: 0; height: 34px; padding: 0 9px; color: #34352e; font: inherit; font-weight: 400; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
 .oss-sync-form input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
+.oss-sync-enabled { display: inline-flex; flex: none; align-items: center; gap: 8px; margin: 3px 0 0; color: #454840; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.oss-sync-enabled input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); cursor: pointer; }
+.oss-sync-enabled input:disabled { cursor: wait; }
 .oss-sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
 .oss-sync-actions button { height: 34px; padding: 0 12px; color: #5d6057; font-size: 12px; font-weight: 600; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; cursor: pointer; }
 .oss-sync-actions button:hover:not(:disabled) { background: #f7f7f2; border-color: #b6b8b0; }
