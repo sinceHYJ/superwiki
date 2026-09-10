@@ -529,6 +529,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .oss-sync-actions button { height: 34px; padding: 0 12px; color: #5d6057; font-size: 12px; font-weight: 600; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; cursor: pointer; }
 .oss-sync-actions button:hover:not(:disabled) { background: #f7f7f2; border-color: #b6b8b0; }
 .oss-sync-actions button.primary { color: #fff; background: var(--accent-strong); border-color: var(--accent-strong); }
+.oss-sync-actions button.primary:hover:not(:disabled) { color: #fff; background: var(--accent-strong); border-color: var(--accent-strong); filter: brightness(.94); }
 .oss-sync-actions button:disabled { cursor: wait; opacity: .55; }
 .oss-sync-status { min-height: 20px; margin: 14px 0 0; color: #71746b; font-size: 12px; line-height: 1.5; }
 .oss-sync-status.error { color: #a13f38; }

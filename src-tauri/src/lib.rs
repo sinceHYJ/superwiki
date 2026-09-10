@@ -254,6 +254,20 @@ fn normalize_oss_prefix(prefix: &str) -> Result<String, String> {
     Ok(prefix)
 }
 
+fn normalize_oss_endpoint(endpoint: &str) -> Result<String, String> {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    if endpoint.is_empty() {
+        return Err("请填写 OSS Endpoint".into());
+    }
+    if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
+        return Ok(endpoint.to_string());
+    }
+    if endpoint.contains("://") {
+        return Err("OSS Endpoint 必须使用 http 或 https 协议".into());
+    }
+    Ok(format!("https://{endpoint}"))
+}
+
 fn validate_oss_sync_config(config: &OssSyncConfig) -> Result<(), String> {
     if config.region.trim().is_empty()
         || config.endpoint.trim().is_empty()
@@ -454,10 +468,11 @@ fn load_oss_sync_settings(app: tauri::AppHandle) -> Result<Option<OssSyncSetting
         return Ok(None);
     }
 
-    let config: OssSyncConfig = serde_json::from_slice(
+    let mut config: OssSyncConfig = serde_json::from_slice(
         &fs::read(&config_path).map_err(|error| format!("无法读取 OSS 配置：{error}"))?,
     )
     .map_err(|error| format!("OSS 配置无效：{error}"))?;
+    config.endpoint = normalize_oss_endpoint(&config.endpoint)?;
     validate_oss_sync_config(&config)?;
     let has_access_key_secret = oss_sync_secret_entry()?.get_password().is_ok();
 
@@ -478,7 +493,7 @@ fn save_oss_sync_settings(
 ) -> Result<(), String> {
     let config = OssSyncConfig {
         region: settings.region.trim().to_string(),
-        endpoint: settings.endpoint.trim().trim_end_matches('/').to_string(),
+        endpoint: normalize_oss_endpoint(&settings.endpoint)?,
         bucket: settings.bucket.trim().to_string(),
         prefix: normalize_oss_prefix(&settings.prefix)?,
         access_key_id: settings.access_key_id.trim().to_string(),
@@ -506,10 +521,11 @@ fn save_oss_sync_settings(
 #[tauri::command]
 fn load_oss_sync_credentials(app: tauri::AppHandle) -> Result<OssSyncCredentials, String> {
     let config_path = oss_sync_config_path(&app)?;
-    let config: OssSyncConfig = serde_json::from_slice(
+    let mut config: OssSyncConfig = serde_json::from_slice(
         &fs::read(config_path).map_err(|error| format!("请先保存 OSS 配置：{error}"))?,
     )
     .map_err(|error| format!("OSS 配置无效：{error}"))?;
+    config.endpoint = normalize_oss_endpoint(&config.endpoint)?;
     validate_oss_sync_config(&config)?;
     let access_key_secret = oss_sync_secret_entry()?
         .get_password()
@@ -860,6 +876,19 @@ mod tests {
         assert!(is_office(Path::new("slides.pptx")));
         assert!(!is_office(Path::new("legacy.doc")));
         assert!(!is_office(Path::new("document.pdf")));
+    }
+
+    #[test]
+    fn normalizes_oss_endpoints() {
+        assert_eq!(
+            normalize_oss_endpoint("oss-cn-beijing.aliyuncs.com/").unwrap(),
+            "https://oss-cn-beijing.aliyuncs.com"
+        );
+        assert_eq!(
+            normalize_oss_endpoint("http://localhost:9000/").unwrap(),
+            "http://localhost:9000"
+        );
+        assert!(normalize_oss_endpoint("ftp://example.com").is_err());
     }
 
     #[test]
