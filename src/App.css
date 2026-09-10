@@ -1530,3 +1530,96 @@ button.folder-placeholder:hover {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.tab-bar {
+  flex: 0 0 39px;
+  min-width: 0;
+  height: 39px;
+  overflow: hidden;
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.tab-list {
+  display: flex;
+  min-width: max-content;
+  height: 100%;
+  padding: 0 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.file-tab {
+  display: flex;
+  max-width: 210px;
+  min-width: 0;
+  height: 100%;
+  align-items: center;
+  color: var(--ui-muted);
+  background: transparent;
+  border-right: 1px solid var(--ui-border);
+  border-bottom: 2px solid transparent;
+}
+
+.file-tab:first-child {
+  border-left: 1px solid var(--ui-border);
+}
+
+.file-tab.active {
+  color: var(--ui-text);
+  background: var(--ui-canvas);
+  border-bottom-color: var(--accent-primary);
+}
+
+.file-tab-select,
+.file-tab-close {
+  display: inline-flex;
+  align-items: center;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.file-tab-select {
+  min-width: 0;
+  gap: 7px;
+  height: 100%;
+  padding: 0 8px 0 10px;
+  font-size: 12px;
+}
+
+.file-tab-select svg {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+}
+
+.file-tab-select span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tab-close {
+  flex: 0 0 28px;
+  height: 28px;
+  justify-content: center;
+  margin-right: 3px;
+  border-radius: 5px;
+}
+
+.file-tab-close:hover {
+  color: var(--ui-text);
+  background: var(--ui-hover);
+}
+
+.file-tab-select:focus-visible,
+.file-tab-close:focus-visible {
+  outline: 2px solid var(--accent-medium);
+  outline-offset: -2px;
+}
+
+.document-fullscreen .tab-bar {
+  display: none;
+}

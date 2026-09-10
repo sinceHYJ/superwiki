@@ -173,6 +173,7 @@ const OfficePreview = lazy(() => import("./OfficePreview"));
 function App() {
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
+  const [openTabs, setOpenTabs] = useState<ActiveFile[]>([]);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("document");
   const [recentEditedDocuments, setRecentEditedDocuments] = useState<RecentEditedDocument[]>([]);
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
@@ -315,6 +316,11 @@ function App() {
   const openFile = useCallback(async (file: ActiveFile) => {
     try {
       setError("");
+      const currentFile = activeFileRef.current;
+      if (currentFile?.root === file.root && currentFile.path === file.path) {
+        setWorkspaceView("document");
+        return true;
+      }
       await flushPendingSave();
 
       if (file.kind === "image") {
@@ -355,6 +361,9 @@ function App() {
 
       activeFileRef.current = file;
       setActiveFile(file);
+      setOpenTabs((current) => current.some((tab) => tab.root === file.root && tab.path === file.path)
+        ? current
+        : [...current, file]);
       setWorkspaceView("document");
       return true;
     } catch (reason) {
@@ -402,6 +411,7 @@ function App() {
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
+      setOpenTabs([]);
       setContent("");
       replaceImageUrl(null);
       setOfficeData(null);
@@ -536,6 +546,7 @@ function App() {
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
+      setOpenTabs([]);
       setContent("");
       replaceImageUrl(null);
       setOfficeData(null);
@@ -580,6 +591,43 @@ function App() {
       kind: file.isImage ? "image" : file.isOffice ? "office" : "markdown",
     });
   }, [openFile, workspace]);
+
+  const closeTab = useCallback(async (tab: ActiveFile) => {
+    const tabIndex = openTabs.findIndex((item) => item.root === tab.root && item.path === tab.path);
+    if (tabIndex === -1) return;
+
+    const currentFile = activeFileRef.current;
+    const closesActiveFile = currentFile?.root === tab.root && currentFile.path === tab.path;
+    if (!closesActiveFile) {
+      setOpenTabs((current) => current.filter((item) => item.root !== tab.root || item.path !== tab.path));
+      return;
+    }
+
+    try {
+      setError("");
+      await flushPendingSave();
+      const remainingTabs = openTabs.filter((item) => item.root !== tab.root || item.path !== tab.path);
+      const nextActiveFile = remainingTabs[tabIndex] ?? remainingTabs[tabIndex - 1] ?? null;
+
+      if (nextActiveFile && !(await openFile(nextActiveFile))) return;
+
+      setOpenTabs(remainingTabs);
+      if (nextActiveFile) return;
+
+      activeFileRef.current = null;
+      editorMarkdownRef.current = null;
+      loadedContent.current = "";
+      contentRef.current = "";
+      setActiveFile(null);
+      setContent("");
+      replaceImageUrl(null);
+      setOfficeData(null);
+      setSaveState("saved");
+      setWorkspaceView("document");
+    } catch (reason) {
+      setError(String(reason));
+    }
+  }, [flushPendingSave, openFile, openTabs, replaceImageUrl]);
 
   const showQuickAccessView = useCallback(async (view: "recent" | "favorites") => {
     if (!workspace) return;
@@ -774,6 +822,22 @@ function App() {
         setActiveFile(updatedFile);
       }
 
+      setOpenTabs((current) => current.map((file) => {
+        const affected = node.isDir
+          ? isPathInsideDirectory(file.path, node.path)
+          : file.path === node.path;
+        if (!affected) return file;
+
+        const nextPath = node.isDir
+          ? replaceDirectoryPath(file.path, node.path, renamedPath)
+          : renamedPath;
+        return {
+          ...file,
+          path: nextPath,
+          name: pathFileName(nextPath),
+        };
+      }));
+
       const renamedRecentDocuments = readRecentEditedDocuments(workspace.root).map((document) => {
         const affected = node.isDir
           ? isPathInsideDirectory(document.path, node.path)
@@ -836,6 +900,17 @@ function App() {
       const currentFile = activeFileRef.current;
       const deletesCurrentFile = currentFile
         && (currentFile.path === node.path || (node.isDir && isPathInsideDirectory(currentFile.path, node.path)));
+      const currentTabIndex = currentFile
+        ? openTabs.findIndex((tab) => tab.root === currentFile.root && tab.path === currentFile.path)
+        : -1;
+      const remainingTabs = openTabs.filter((tab) => (
+        node.isDir
+          ? !isPathInsideDirectory(tab.path, node.path)
+          : tab.path !== node.path
+      ));
+      const nextActiveFile = deletesCurrentFile
+        ? remainingTabs[currentTabIndex] ?? remainingTabs[currentTabIndex - 1] ?? null
+        : null;
       if (deletesCurrentFile) await flushPendingSave();
 
       await invoke(node.isDir ? "delete_workspace_directory" : "delete_workspace_file", {
@@ -871,6 +946,9 @@ function App() {
         setSaveState("saved");
         setWorkspaceView("document");
       }
+      setOpenTabs(remainingTabs);
+
+      if (nextActiveFile) await openFile(nextActiveFile);
 
       setCreatingEntry(null);
       setRenamingPath(null);
@@ -885,7 +963,7 @@ function App() {
     } catch (reason) {
       setError(`已删除${entryLabel}，但无法刷新目录：${String(reason)}`);
     }
-  }, [flushPendingSave, replaceImageUrl, workspace]);
+  }, [flushPendingSave, openFile, openTabs, replaceImageUrl, workspace]);
 
   const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
     setSyncState("syncing");
@@ -1449,6 +1527,47 @@ function App() {
             </div>
           )}
         </header>
+
+        {openTabs.length > 0 && (
+          <nav className="tab-bar" aria-label="已打开文件">
+            <div className="tab-list" role="tablist">
+              {openTabs.map((tab) => {
+                const isActive = workspaceView === "document"
+                  && activeFile?.root === tab.root
+                  && activeFile.path === tab.path;
+                const tabPath = workspaceRelativePath(tab.root, tab.path, tab.name);
+                return (
+                  <div key={`${tab.root}:${tab.path}`} className={`file-tab ${isActive ? "active" : ""}`}>
+                    <button
+                      className="file-tab-select"
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      title={tabPath}
+                      onClick={() => void openFile(tab)}
+                    >
+                      {tab.kind === "markdown"
+                        ? <FileCode2 size={14} />
+                        : tab.kind === "image"
+                          ? <ImageIcon size={14} />
+                          : <File size={14} />}
+                      <span>{tab.name}</span>
+                    </button>
+                    <button
+                      className="file-tab-close"
+                      type="button"
+                      title={`关闭 ${tab.name}`}
+                      aria-label={`关闭 ${tab.name}`}
+                      onClick={() => void closeTab(tab)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </nav>
+        )}
 
         {error && <div className="error-banner">{error}</div>}
 
