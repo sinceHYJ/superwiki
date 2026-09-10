@@ -1542,16 +1542,23 @@ button.folder-placeholder:hover {
 
 .tab-list {
   display: flex;
-  min-width: max-content;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   height: 100%;
   padding: 0 8px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.tab-list::-webkit-scrollbar {
+  display: none;
 }
 
 .file-tab {
   display: flex;
+  flex: 0 0 auto;
   max-width: 210px;
   min-width: 0;
   height: 100%;

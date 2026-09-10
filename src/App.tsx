@@ -1,5 +1,5 @@
 import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -222,6 +222,7 @@ function App() {
   const contentRef = useRef("");
   const imageUrlRef = useRef<string | null>(null);
   const editorMarkdownRef = useRef<(() => string) | null>(null);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
   const editorPaneRef = useRef<HTMLElement>(null);
   const previewPaneRef = useRef<HTMLElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -474,6 +475,11 @@ function App() {
   useEffect(() => {
     if (activeFile?.kind !== "markdown") setDocumentFullscreen(false);
   }, [activeFile?.kind]);
+
+  useEffect(() => {
+    if (workspaceView !== "document" || !activeFile) return;
+    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeFile, workspaceView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1133,6 +1139,21 @@ function App() {
     void getCurrentWindow().startDragging();
   };
 
+  const handleTabListWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    const tabList = event.currentTarget;
+    if (tabList.scrollWidth <= tabList.clientWidth) return;
+
+    const delta = event.shiftKey ? event.deltaX || event.deltaY : event.deltaY;
+    if (!delta) return;
+
+    const maxScrollLeft = tabList.scrollWidth - tabList.clientWidth;
+    const nextScrollLeft = Math.min(maxScrollLeft, Math.max(0, tabList.scrollLeft + delta));
+    if (nextScrollLeft === tabList.scrollLeft) return;
+
+    tabList.scrollLeft = nextScrollLeft;
+    event.preventDefault();
+  }, []);
+
   const activeRelativePath = activeFile
     ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
     : null;
@@ -1530,7 +1551,7 @@ function App() {
 
         {openTabs.length > 0 && (
           <nav className="tab-bar" aria-label="已打开文件">
-            <div className="tab-list" role="tablist">
+            <div className="tab-list" role="tablist" onWheel={handleTabListWheel}>
               {openTabs.map((tab) => {
                 const isActive = workspaceView === "document"
                   && activeFile?.root === tab.root
@@ -1541,6 +1562,7 @@ function App() {
                     <button
                       className="file-tab-select"
                       type="button"
+                      ref={isActive ? activeTabRef : null}
                       role="tab"
                       aria-selected={isActive}
                       title={tabPath}
