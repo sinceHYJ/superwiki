@@ -22,6 +22,7 @@ import {
   PanelRightClose,
   Pencil,
   RefreshCw,
+  Save,
   Search,
   Square,
   Settings,
@@ -131,6 +132,7 @@ type FavoriteDocument = {
 };
 
 type FavoriteStorage = Record<string, FavoriteDocument[]>;
+type DocumentDrafts = Record<string, string>;
 
 const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
 const RECENT_EDITED_STORAGE_KEY = "superwiki.recentEditedDocuments";
@@ -139,6 +141,7 @@ const MAX_RECENT_EDITED_DOCUMENTS = 20;
 const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
 const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
 const OPEN_TAB_LIMIT_STORAGE_KEY = "superwiki.openTabLimit";
+const AUTO_SAVE_STORAGE_KEY = "superwiki.autoSave";
 const DEFAULT_OPEN_TAB_LIMIT = 8;
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "yellow", name: "明亮黄", color: "#d9ed72" },
@@ -164,6 +167,14 @@ function readOpenTabLimit() {
   const storedLimit = Number.parseInt(localStorage.getItem(OPEN_TAB_LIMIT_STORAGE_KEY) ?? "", 10);
   return Number.isInteger(storedLimit) && storedLimit > 0 ? storedLimit : DEFAULT_OPEN_TAB_LIMIT;
 }
+
+function readAutoSave() {
+  return localStorage.getItem(AUTO_SAVE_STORAGE_KEY) !== "false";
+}
+
+function documentDraftKey(file: Pick<ActiveFile, "root" | "path">) {
+  return `${file.root}:${file.path}`;
+}
 const DEFAULT_SIDEBAR_WIDTH = 286;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
@@ -186,6 +197,7 @@ function App() {
   const [favoriteDocuments, setFavoriteDocuments] = useState<FavoriteDocument[]>([]);
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
   const [content, setContent] = useState("");
+  const [documentDrafts, setDocumentDrafts] = useState<DocumentDrafts>({});
   const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ line: 1, column: 1 });
   const [editorVersion, setEditorVersion] = useState(0);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -200,6 +212,7 @@ function App() {
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"basic" | "appearance" | "sync" | "about">("basic");
   const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
+  const [autoSave, setAutoSave] = useState(readAutoSave);
   const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
   const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
   const [syncState, setSyncState] = useState<SyncState>("idle");
@@ -300,11 +313,13 @@ function App() {
     }, 2000);
   }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret]);
 
-  const flushPendingSave = useCallback(async () => {
+  const flushPendingSave = useCallback(async (force = false) => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
+
+    if (!force && !autoSave) return;
 
     const file = activeFileRef.current;
     if (!file || file.kind !== "markdown") return;
@@ -318,9 +333,26 @@ function App() {
       content: latestContent,
     });
     loadedContent.current = latestContent;
+    setDocumentDrafts((drafts) => {
+      const nextDrafts = { ...drafts };
+      delete nextDrafts[documentDraftKey(file)];
+      return nextDrafts;
+    });
     recordRecentEdit(file);
     queueWorkspaceFileSync(file.root, file.path);
-  }, [queueWorkspaceFileSync, recordRecentEdit, syncEditorContent]);
+  }, [autoSave, queueWorkspaceFileSync, recordRecentEdit, syncEditorContent]);
+
+  const saveCurrentFile = useCallback(async () => {
+    try {
+      setError("");
+      setSaveState("saving");
+      await flushPendingSave(true);
+      setSaveState("saved");
+    } catch (reason) {
+      setSaveState("error");
+      setError(String(reason));
+    }
+  }, [flushPendingSave]);
 
   const openFile = useCallback(async (file: ActiveFile) => {
     try {
@@ -359,9 +391,10 @@ function App() {
         });
         replaceImageUrl(null);
         setOfficeData(null);
+        const draft = documentDrafts[documentDraftKey(file)];
         loadedContent.current = fileContent;
-        contentRef.current = fileContent;
-        setContent(fileContent);
+        contentRef.current = draft ?? fileContent;
+        setContent(draft ?? fileContent);
         setCursorPosition({ line: 1, column: 1 });
         setEditorVersion((version) => version + 1);
         setViewMode("editor");
@@ -379,7 +412,7 @@ function App() {
       setError(String(reason));
       return false;
     }
-  }, [flushPendingSave, openTabLimit, replaceImageUrl]);
+  }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
   const loadWorkspace = useCallback(async (root: string, remember = true) => {
     setWorkspaceLoading(true);
@@ -421,6 +454,7 @@ function App() {
       contentRef.current = "";
       setActiveFile(null);
       setOpenTabs([]);
+      setDocumentDrafts({});
       setContent("");
       replaceImageUrl(null);
       setOfficeData(null);
@@ -519,7 +553,7 @@ function App() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    if (!activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
+    if (!autoSave || !activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
 
     setSaveState("saving");
     saveTimerRef.current = window.setTimeout(async () => {
@@ -530,6 +564,11 @@ function App() {
           content,
         });
         loadedContent.current = content;
+        setDocumentDrafts((drafts) => {
+          const nextDrafts = { ...drafts };
+          delete nextDrafts[documentDraftKey(activeFile)];
+          return nextDrafts;
+        });
         recordRecentEdit(activeFile);
         queueWorkspaceFileSync(activeFile.root, activeFile.path);
         saveTimerRef.current = null;
@@ -544,7 +583,7 @@ function App() {
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
-  }, [activeFile, content, queueWorkspaceFileSync, recordRecentEdit]);
+  }, [activeFile, autoSave, content, queueWorkspaceFileSync, recordRecentEdit]);
 
   const closeWorkspace = async () => {
     try {
@@ -561,6 +600,7 @@ function App() {
       contentRef.current = "";
       setActiveFile(null);
       setOpenTabs([]);
+      setDocumentDrafts({});
       setContent("");
       replaceImageUrl(null);
       setOfficeData(null);
@@ -573,6 +613,16 @@ function App() {
   };
 
   const handleEditorChange = useCallback((value: string) => {
+    const file = activeFileRef.current;
+    if (file?.kind === "markdown") {
+      setDocumentDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        const key = documentDraftKey(file);
+        if (value === loadedContent.current) delete nextDrafts[key];
+        else nextDrafts[key] = value;
+        return nextDrafts;
+      });
+    }
     contentRef.current = value;
     setContent(value);
   }, []);
@@ -614,12 +664,22 @@ function App() {
     const closesActiveFile = currentFile?.root === tab.root && currentFile.path === tab.path;
     if (!closesActiveFile) {
       setOpenTabs((current) => current.filter((item) => item.root !== tab.root || item.path !== tab.path));
+      setDocumentDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[documentDraftKey(tab)];
+        return nextDrafts;
+      });
       return;
     }
 
     try {
       setError("");
       await flushPendingSave();
+      setDocumentDrafts((drafts) => {
+        const nextDrafts = { ...drafts };
+        delete nextDrafts[documentDraftKey(tab)];
+        return nextDrafts;
+      });
       const remainingTabs = openTabs.filter((item) => item.root !== tab.root || item.path !== tab.path);
       const nextActiveFile = remainingTabs[tabIndex] ?? remainingTabs[tabIndex - 1] ?? null;
 
@@ -1278,6 +1338,15 @@ function App() {
             >
               <PanelLeftClose size={15} />
             </button>
+            <button
+              className="windows-titlebar-save"
+              onClick={() => void saveCurrentFile()}
+              title="保存当前文档"
+              aria-label="保存当前文档"
+              disabled={workspaceView !== "document" || activeFile?.kind !== "markdown"}
+            >
+              <Save size={15} />
+            </button>
           </div>
           <div className="windows-titlebar-actions">
             {titlebarDocumentActions}
@@ -1569,6 +1638,7 @@ function App() {
                 const isActive = workspaceView === "document"
                   && activeFile?.root === tab.root
                   && activeFile.path === tab.path;
+                const hasUnsavedChanges = tab.kind === "markdown" && documentDraftKey(tab) in documentDrafts;
                 const tabPath = workspaceRelativePath(tab.root, tab.path, tab.name);
                 return (
                   <div key={`${tab.root}:${tab.path}`} className={`file-tab ${isActive ? "active" : ""}`}>
@@ -1587,6 +1657,7 @@ function App() {
                           ? <ImageIcon size={14} />
                           : <File size={14} />}
                       <span>{tab.name}</span>
+                      {hasUnsavedChanges && <span className="file-tab-unsaved" aria-label="有未保存的修改" />}
                     </button>
                     <button
                       className="file-tab-close"
@@ -1839,6 +1910,27 @@ function App() {
                           value={openTabLimit}
                           aria-label="打开的 Tab 数量"
                           onChange={(event) => void changeOpenTabLimit(event.currentTarget.valueAsNumber)}
+                        />
+                      </label>
+                      <label className="editor-setting-row">
+                        <span>
+                          <strong>自动保存</strong>
+                          <small>关闭后仅在点击顶部保存按钮时写入当前文档。</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={autoSave}
+                          aria-label="自动保存"
+                          onChange={(event) => {
+                            const enabled = event.target.checked;
+                            setAutoSave(enabled);
+                            localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(enabled));
+                            if (!enabled && saveTimerRef.current !== null) {
+                              window.clearTimeout(saveTimerRef.current);
+                              saveTimerRef.current = null;
+                              setSaveState("saved");
+                            }
+                          }}
                         />
                       </label>
                     </section>

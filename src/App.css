@@ -169,6 +169,7 @@ button { font: inherit; }
 
 .windows-titlebar-settings,
 .windows-titlebar-sidebar-toggle,
+.windows-titlebar-save,
 .windows-titlebar-control {
   display: inline-flex;
   height: 32px;
@@ -193,12 +194,17 @@ button { font: inherit; }
   margin-left: 1px;
 }
 
+.windows-titlebar-save {
+  width: 32px;
+}
+
 .windows-titlebar-control {
   width: 46px;
 }
 
 .windows-titlebar-settings:hover,
 .windows-titlebar-sidebar-toggle:hover,
+.windows-titlebar-save:hover:not(:disabled),
 .windows-titlebar-control:hover {
   color: var(--ui-text);
   background: var(--ui-hover);
@@ -551,8 +557,9 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .editor-setting-row > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .editor-setting-row strong { color: #42443d; font-size: 13px; font-weight: 600; }
 .editor-setting-row small { color: #8a8c83; font-size: 11px; line-height: 1.5; }
-.editor-setting-row input { flex: 0 0 76px; width: 76px; height: 34px; box-sizing: border-box; padding: 0 8px; color: #34352e; font-size: 13px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
-.editor-setting-row input:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
+.editor-setting-row input[type="number"] { flex: 0 0 76px; width: 76px; height: 34px; box-sizing: border-box; padding: 0 8px; color: #34352e; font-size: 13px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
+.editor-setting-row input[type="number"]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
+.editor-setting-row input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); cursor: pointer; }
 .oss-sync-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .oss-sync-header .settings-section-heading { min-width: 0; }
 .theme-color-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -646,6 +653,11 @@ body {
   border: 0;
   border-radius: 9px;
   box-shadow: none;
+}
+
+.windows-titlebar-save:disabled {
+  cursor: default;
+  opacity: .4;
 }
 
 .library-name {
@@ -1649,6 +1661,14 @@ button.folder-placeholder:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-tab-unsaved {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4caf70;
 }
 
 .file-tab-close {
