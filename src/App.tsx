@@ -23,6 +23,7 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Square,
   Settings,
   Star,
   Trash2,
@@ -955,7 +956,7 @@ function App() {
               title={windowMaximized ? "还原" : "最大化"}
               aria-label={windowMaximized ? "还原窗口" : "最大化窗口"}
             >
-              {windowMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              {windowMaximized ? <Minimize2 size={14} /> : <Square size={14} />}
             </button>
             <button
               className="windows-titlebar-control windows-titlebar-close"
