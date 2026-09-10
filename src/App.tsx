@@ -191,7 +191,7 @@ function App() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [officeData, setOfficeData] = useState<ArrayBuffer | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
-  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [, setSaveState] = useState<SaveState>("saved");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [documentFullscreen, setDocumentFullscreen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -1188,9 +1188,6 @@ function App() {
     event.preventDefault();
   }, []);
 
-  const activeRelativePath = activeFile
-    ? workspaceRelativePath(activeFile.root, activeFile.path, activeFile.name)
-    : null;
   const documentViewActivePath = workspaceView === "document" ? activeFile?.path ?? null : null;
   const normalizedDocumentSearchQuery = documentSearchQuery.trim().toLocaleLowerCase();
   const documentSearchResults = useMemo(
@@ -1201,6 +1198,40 @@ function App() {
   );
   const activeFileFavorited = activeFile?.kind === "markdown"
     && favoriteDocuments.some((document) => document.path === activeFile.path);
+  const titlebarDocumentActions = workspaceView === "document" && activeFile?.kind === "markdown" && (
+    <div className="titlebar-document-actions">
+      <button
+        className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
+        onClick={toggleActiveFileFavorite}
+        title={activeFileFavorited ? "取消收藏" : "收藏文档"}
+        aria-label={activeFileFavorited ? "取消收藏" : "收藏文档"}
+        aria-pressed={activeFileFavorited}
+      >
+        <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
+      </button>
+      <div className="view-switcher" aria-label="视图模式">
+        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
+        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
+      </div>
+      <button
+        className="icon-button document-fullscreen-toggle"
+        onClick={() => void enterDocumentFullscreen()}
+        title="只读全屏（Esc 退出）"
+        aria-label="只读全屏（Esc 退出）"
+      >
+        <Maximize2 size={18} />
+      </button>
+      <button
+        className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
+        onClick={() => setOutlineOpen((value) => !value)}
+        title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+        aria-label={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+        aria-pressed={!outlineOpen}
+      >
+        <PanelRightClose size={18} />
+      </button>
+    </div>
+  );
 
   return (
     <main
@@ -1212,6 +1243,7 @@ function App() {
         <>
           <div className="window-titlebar-drag-region" onMouseDown={handleTitlebarMouseDown} />
           <div className="window-titlebar-actions">
+            {titlebarDocumentActions}
             <button
               className="settings-button"
               onClick={() => setSettingsOpen(true)}
@@ -1248,6 +1280,7 @@ function App() {
             </button>
           </div>
           <div className="windows-titlebar-actions">
+            {titlebarDocumentActions}
             <button
               className="windows-titlebar-settings"
               onClick={() => setSettingsOpen(true)}
@@ -1529,70 +1562,6 @@ function App() {
       )}
 
       <section className="workspace">
-        <header className="toolbar">
-          <div className="document-title">
-            <button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen((value) => !value)} title="切换目录">
-              <PanelLeftClose size={18} />
-            </button>
-            <img className="toolbar-logo" src="/superwiki-logo.png" alt="" />
-            <div className="document-heading">
-              <h1>{workspaceView === "recent"
-                ? "最近编辑"
-                : workspaceView === "favorites"
-                  ? "我的收藏"
-                  : activeFile?.name ?? workspace?.name ?? "SuperWiki"}</h1>
-              {workspaceView !== "document" ? (
-                <div className="document-meta">
-                  {workspaceView === "recent" ? "最近成功编辑的 Markdown 文档" : "收藏的 Markdown 文档"}
-                </div>
-              ) : activeFile && activeRelativePath && (
-                <div className="document-meta">
-                  <span className="document-path" title={activeRelativePath}>{activeRelativePath}</span>
-                  <span className="meta-separator">·</span>
-                  {activeFile.kind === "markdown" && <span className={`save-state ${saveState}`}>{saveLabel(saveState)}</span>}
-                  {activeFile.kind === "image" && <span className="readonly-state">图片预览 · 只读</span>}
-                  {activeFile.kind === "office" && <span className="readonly-state">Office 预览 · 只读</span>}
-                </div>
-              )}
-            </div>
-          </div>
-
-        {workspaceView === "document" && activeFile?.kind === "markdown" && (
-            <div className="toolbar-actions">
-              <button
-                className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
-                onClick={toggleActiveFileFavorite}
-                title={activeFileFavorited ? "取消收藏" : "收藏文档"}
-                aria-label={activeFileFavorited ? "取消收藏" : "收藏文档"}
-                aria-pressed={activeFileFavorited}
-              >
-                <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
-              </button>
-              <div className="view-switcher" aria-label="视图模式">
-                <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
-                <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
-              </div>
-              <button
-                className="icon-button document-fullscreen-toggle"
-                onClick={() => void enterDocumentFullscreen()}
-                title="只读全屏（Esc 退出）"
-                aria-label="只读全屏（Esc 退出）"
-              >
-                <Maximize2 size={18} />
-              </button>
-              <button
-                className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
-                onClick={() => setOutlineOpen((value) => !value)}
-                title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
-                aria-label={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
-                aria-pressed={!outlineOpen}
-              >
-                <PanelRightClose size={18} />
-              </button>
-            </div>
-          )}
-        </header>
-
         {openTabs.length > 0 && (
           <nav className="tab-bar" aria-label="已打开文件">
             <div className="tab-list" role="tablist" onWheel={handleTabListWheel}>
@@ -2586,12 +2555,6 @@ function workspaceRelativePath(root: string, path: string, fallbackName: string)
   const normalizedPath = path.replace(/\\/g, "/");
   const prefix = `${normalizedRoot}/`;
   return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : fallbackName;
-}
-
-function saveLabel(state: SaveState) {
-  if (state === "saving") return "正在保存…";
-  if (state === "error") return "保存失败";
-  return "已保存";
 }
 
 function getDocumentStatistics(content: string) {

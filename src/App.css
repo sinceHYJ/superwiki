@@ -89,6 +89,9 @@ button { font: inherit; }
   z-index: 9;
   top: 0;
   right: 16px;
+  display: flex;
+  height: 32px;
+  align-items: center;
 }
 
 .windows-titlebar {
@@ -138,6 +141,30 @@ button { font: inherit; }
 
 .windows-titlebar-actions {
   gap: 2px;
+}
+
+.titlebar-document-actions {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+}
+
+.titlebar-document-actions .icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 0;
+}
+
+.titlebar-document-actions .view-switcher {
+  height: 28px;
+  padding: 2px;
+}
+
+.titlebar-document-actions .view-switcher button {
+  min-width: 36px;
+  height: 24px;
 }
 
 .windows-titlebar-settings,
