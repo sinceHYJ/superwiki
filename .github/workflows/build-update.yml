@@ -45,6 +45,9 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          # Release is created by the draft job after both matrix builds finish.
+          # Leaving tagName/releaseName/releaseId unset keeps this action build-only.
+          uploadUpdaterJson: false
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json
       - uses: actions/upload-artifact@v4
         with:
