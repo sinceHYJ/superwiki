@@ -18,7 +18,9 @@ import {
   Minus,
   FolderOpen,
   Info,
+  Keyboard,
   PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   Pencil,
   RefreshCw,
@@ -40,6 +42,20 @@ import { isPlantUmlLanguage } from "./plantumlRenderer";
 import { remarkLineBreak } from "./remarkLineBreak";
 import { remarkVideoEmbed } from "./remarkVideoEmbed";
 import { DEFAULT_CODE_BLOCK_TITLE, extractCodeBlockTitles } from "./codeBlockMetadata";
+import {
+  DEFAULT_SHORTCUT_BINDINGS,
+  SHORTCUT_DEFINITIONS,
+  chordFromKeyboardEvent,
+  displayShortcut,
+  readShortcutBindings,
+  saveShortcutBindings,
+  setShortcutBinding,
+  shortcutTitle,
+  type EditorShortcutId,
+  type ShortcutBindings,
+  type ShortcutId,
+} from "./shortcuts";
+import type { EditorHandle, EditorShortcutCommand } from "./WysiwygEditor";
 import { imageMimeType, proxyWorkspaceImage, resolveWorkspacePath } from "./workspaceImages";
 import {
   loadOssSyncSettings,
@@ -210,7 +226,10 @@ function App() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [windowMaximized, setWindowMaximized] = useState(false);
-  const [settingsSection, setSettingsSection] = useState<"basic" | "appearance" | "sync" | "about">("basic");
+  const [settingsSection, setSettingsSection] = useState<"basic" | "appearance" | "shortcuts" | "sync" | "about">("basic");
+  const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(readShortcutBindings);
+  const [shortcutRecording, setShortcutRecording] = useState<ShortcutId | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
   const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
   const [autoSave, setAutoSave] = useState(readAutoSave);
   const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
@@ -242,7 +261,7 @@ function App() {
   const activeFileRef = useRef<ActiveFile | null>(null);
   const contentRef = useRef("");
   const imageUrlRef = useRef<string | null>(null);
-  const editorMarkdownRef = useRef<(() => string) | null>(null);
+  const editorHandleRef = useRef<EditorHandle | null>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
   const editorPaneRef = useRef<HTMLElement>(null);
   const previewPaneRef = useRef<HTMLElement>(null);
@@ -258,7 +277,7 @@ function App() {
   }, []);
 
   const syncEditorContent = useCallback(() => {
-    const latestMarkdown = editorMarkdownRef.current?.();
+    const latestMarkdown = editorHandleRef.current?.getMarkdown();
     if (latestMarkdown === undefined) return contentRef.current;
 
     contentRef.current = latestMarkdown;
@@ -627,8 +646,8 @@ function App() {
     setContent(value);
   }, []);
 
-  const handleEditorReady = useCallback((getMarkdown: (() => string) | null) => {
-    editorMarkdownRef.current = getMarkdown;
+  const handleEditorReady = useCallback((handle: EditorHandle | null) => {
+    editorHandleRef.current = handle;
   }, []);
 
   const handleCursorPositionChange = useCallback((position: CursorPosition) => {
@@ -689,7 +708,7 @@ function App() {
       if (nextActiveFile) return;
 
       activeFileRef.current = null;
-      editorMarkdownRef.current = null;
+      editorHandleRef.current = null;
       loadedContent.current = "";
       contentRef.current = "";
       setActiveFile(null);
@@ -1036,7 +1055,7 @@ function App() {
 
       if (deletesCurrentFile) {
         activeFileRef.current = null;
-        editorMarkdownRef.current = null;
+        editorHandleRef.current = null;
         loadedContent.current = "";
         contentRef.current = "";
         setActiveFile(null);
@@ -1192,6 +1211,92 @@ function App() {
     }
   };
 
+  const editorShortcutLabels = useMemo(() => ({
+    bold: displayShortcut(shortcutBindings.bold),
+    italic: displayShortcut(shortcutBindings.italic),
+    inlineCode: displayShortcut(shortcutBindings.inlineCode),
+    codeBlock: displayShortcut(shortcutBindings.codeBlock),
+    link: displayShortcut(shortcutBindings.link),
+    image: displayShortcut(shortcutBindings.image),
+  }) satisfies Record<EditorShortcutCommand, string>, [shortcutBindings]);
+
+  const updateShortcutBinding = useCallback((id: ShortcutId, chord: string) => {
+    const result = setShortcutBinding(shortcutBindings, id, chord);
+    if (result.error) {
+      setShortcutError(result.error);
+      return;
+    }
+    setShortcutBindings(result.bindings);
+    saveShortcutBindings(result.bindings);
+    setShortcutError("");
+    setShortcutRecording(null);
+  }, [shortcutBindings]);
+
+  const handleShortcutRecording = (event: ReactKeyboardEvent<HTMLButtonElement>, id: ShortcutId) => {
+    if (shortcutRecording !== id) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      setShortcutRecording(null);
+      setShortcutError("");
+      return;
+    }
+    const chord = chordFromKeyboardEvent(event.nativeEvent);
+    if (!chord) {
+      setShortcutError("请按下包含 Ctrl/⌘ 或 Alt 的组合键，或单独按 F1–F12。");
+      return;
+    }
+    updateShortcutBinding(id, chord);
+  };
+
+  useEffect(() => {
+    const editorDefaultChords = SHORTCUT_DEFINITIONS
+      .filter((definition) => definition.scope === "editor")
+      .map((definition) => definition.defaultChord);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (settingsOpen) return;
+      const chord = chordFromKeyboardEvent(event);
+      if (!chord) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const inEditor = Boolean(target?.closest(".wysiwyg-editor"));
+      const definition = SHORTCUT_DEFINITIONS.find((item) => shortcutBindings[item.id] === chord);
+
+      if (!definition) {
+        if (inEditor && editorDefaultChords.includes(chord)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        return;
+      }
+      if (definition.scope === "editor" && !inEditor) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (definition.scope === "editor") {
+        editorHandleRef.current?.runShortcut(definition.id as EditorShortcutId);
+        return;
+      }
+
+      if (definition.id === "save") void saveCurrentFile();
+      if (definition.id === "favorite") toggleActiveFileFavorite();
+      if (definition.id === "toggleSidebar") setSidebarOpen((value) => !value);
+      if (definition.id === "toggleOutline" && activeFileRef.current?.kind === "markdown") {
+        setOutlineOpen((value) => !value);
+      }
+      if (definition.id === "toggleView" && activeFileRef.current?.kind === "markdown" && !documentFullscreen) {
+        changeViewMode(viewMode === "editor" ? "preview" : "editor");
+      }
+      if (definition.id === "toggleFullscreen" && activeFileRef.current?.kind === "markdown") {
+        if (documentFullscreen) setDocumentFullscreen(false);
+        else void enterDocumentFullscreen();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [changeViewMode, documentFullscreen, enterDocumentFullscreen, saveCurrentFile, settingsOpen, shortcutBindings, toggleActiveFileFavorite, viewMode]);
+
   const clampSidebarWidth = useCallback((width: number) => {
     const availableWidth = Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
     return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), Math.max(MIN_SIDEBAR_WIDTH, availableWidth));
@@ -1258,34 +1363,37 @@ function App() {
   );
   const activeFileFavorited = activeFile?.kind === "markdown"
     && favoriteDocuments.some((document) => document.path === activeFile.path);
+  const sidebarToggleTitle = shortcutTitle(sidebarOpen ? "收起目录" : "展开目录", shortcutBindings.toggleSidebar);
+  const outlineToggleTitle = shortcutTitle(outlineOpen ? "隐藏右侧目录" : "显示右侧目录", shortcutBindings.toggleOutline);
+  const fullscreenTitle = shortcutTitle(documentFullscreen ? "退出只读全屏" : "只读全屏", shortcutBindings.toggleFullscreen);
   const titlebarDocumentActions = workspaceView === "document" && activeFile?.kind === "markdown" && (
     <div className="titlebar-document-actions">
       <button
         className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
         onClick={toggleActiveFileFavorite}
-        title={activeFileFavorited ? "取消收藏" : "收藏文档"}
-        aria-label={activeFileFavorited ? "取消收藏" : "收藏文档"}
+        title={shortcutTitle(activeFileFavorited ? "取消收藏" : "收藏文档", shortcutBindings.favorite)}
+        aria-label={shortcutTitle(activeFileFavorited ? "取消收藏" : "收藏文档", shortcutBindings.favorite)}
         aria-pressed={activeFileFavorited}
       >
         <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
       </button>
       <div className="view-switcher" aria-label="视图模式">
-        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")}>编辑</button>
-        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")}>预览</button>
+        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")} title={shortcutTitle("切换到编辑", shortcutBindings.toggleView)}>编辑</button>
+        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")} title={shortcutTitle("切换到预览", shortcutBindings.toggleView)}>预览</button>
       </div>
       <button
         className="icon-button document-fullscreen-toggle"
         onClick={() => void enterDocumentFullscreen()}
-        title="只读全屏（Esc 退出）"
-        aria-label="只读全屏（Esc 退出）"
+        title={`${fullscreenTitle}；Esc 退出`}
+        aria-label={`${fullscreenTitle}；Esc 退出`}
       >
         <Maximize2 size={18} />
       </button>
       <button
         className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
         onClick={() => setOutlineOpen((value) => !value)}
-        title={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
-        aria-label={outlineOpen ? "隐藏右侧目录" : "显示右侧目录"}
+        title={outlineToggleTitle}
+        aria-label={outlineToggleTitle}
         aria-pressed={!outlineOpen}
       >
         <PanelRightClose size={18} />
@@ -1332,17 +1440,17 @@ function App() {
             <span>SuperWiki</span>
             <button
               className="windows-titlebar-sidebar-toggle"
-              onClick={() => setSidebarOpen(false)}
-              title="收起目录"
-              aria-label="收起目录"
+              onClick={() => setSidebarOpen((value) => !value)}
+              title={sidebarToggleTitle}
+              aria-label={sidebarToggleTitle}
             >
-              <PanelLeftClose size={15} />
+              {sidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
             </button>
             <button
               className="windows-titlebar-save"
               onClick={() => void saveCurrentFile()}
-              title="保存当前文档"
-              aria-label="保存当前文档"
+              title={shortcutTitle("保存当前文档", shortcutBindings.save)}
+              aria-label={shortcutTitle("保存当前文档", shortcutBindings.save)}
               disabled={workspaceView !== "document" || activeFile?.kind !== "markdown"}
             >
               <Save size={15} />
@@ -1400,7 +1508,7 @@ function App() {
             </span>
           </div>
           {!IS_WINDOWS && (
-            <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen(false)} title="收起目录" aria-label="收起目录">
+            <button className="icon-button sidebar-head-toggle" onClick={() => setSidebarOpen((value) => !value)} title={sidebarToggleTitle} aria-label={sidebarToggleTitle}>
               <PanelLeftClose size={17} />
             </button>
           )}
@@ -1611,6 +1719,17 @@ function App() {
         )}
       </aside>
 
+      {!sidebarOpen && (
+        <button
+          className="sidebar-reopen-button icon-button"
+          onClick={() => setSidebarOpen(true)}
+          title={sidebarToggleTitle}
+          aria-label={sidebarToggleTitle}
+        >
+          <PanelLeftOpen size={18} />
+        </button>
+      )}
+
       {sidebarOpen && (
         <div
           className="sidebar-resizer"
@@ -1787,6 +1906,7 @@ function App() {
                     onReady={handleEditorReady}
                     onCursorPositionChange={handleCursorPositionChange}
                     onAssetUploaded={handleAssetUploaded}
+                    shortcutLabels={editorShortcutLabels}
                   />
                 </Suspense>
               </section>
@@ -1871,6 +1991,13 @@ function App() {
                   onClick={() => setSettingsSection("appearance")}
                 >
                   <Settings size={16} />外观
+                </button>
+                <button
+                  className={settingsSection === "shortcuts" ? "active" : ""}
+                  aria-current={settingsSection === "shortcuts" ? "page" : undefined}
+                  onClick={() => setSettingsSection("shortcuts")}
+                >
+                  <Keyboard size={16} />快捷键
                 </button>
                 <button
                   className={settingsSection === "sync" ? "active" : ""}
@@ -1958,6 +2085,60 @@ function App() {
                         </button>
                       ))}
                     </div>
+                  </>
+                ) : settingsSection === "shortcuts" ? (
+                  <>
+                    <div className="settings-section-heading shortcut-settings-heading">
+                      <div>
+                        <h3>快捷键</h3>
+                        <p>点击键位后直接按下新的组合键。重复和系统保留键无法保存。</p>
+                      </div>
+                      <button
+                        className="shortcut-reset-all"
+                        type="button"
+                        onClick={() => {
+                          setShortcutBindings({ ...DEFAULT_SHORTCUT_BINDINGS });
+                          saveShortcutBindings(DEFAULT_SHORTCUT_BINDINGS);
+                          setShortcutRecording(null);
+                          setShortcutError("");
+                        }}
+                      >
+                        恢复默认
+                      </button>
+                    </div>
+                    {(["editor", "app"] as const).map((scope) => (
+                      <section className="shortcut-settings" key={scope} aria-labelledby={`${scope}-shortcut-title`}>
+                        <div className="editor-settings-heading">
+                          <h4 id={`${scope}-shortcut-title`}>{scope === "editor" ? "编辑器" : "应用"}</h4>
+                        </div>
+                        {SHORTCUT_DEFINITIONS.filter((definition) => definition.scope === scope).map((definition) => {
+                          const recording = shortcutRecording === definition.id;
+                          const changed = shortcutBindings[definition.id] !== definition.defaultChord;
+                          return (
+                            <div className="shortcut-setting-row" key={definition.id}>
+                              <span>
+                                <strong>{definition.label}</strong>
+                                <small>{changed ? `默认：${displayShortcut(definition.defaultChord)}` : "使用默认快捷键"}</small>
+                              </span>
+                              <button
+                                className={`shortcut-recorder ${recording ? "recording" : ""}`}
+                                type="button"
+                                aria-label={`修改${definition.label}快捷键`}
+                                aria-pressed={recording}
+                                onClick={() => {
+                                  setShortcutRecording(definition.id);
+                                  setShortcutError("");
+                                }}
+                                onKeyDown={(event) => handleShortcutRecording(event, definition.id)}
+                              >
+                                {recording ? "请按下快捷键…" : displayShortcut(shortcutBindings[definition.id])}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </section>
+                    ))}
+                    {shortcutError && <p className="shortcut-error" role="alert">{shortcutError}</p>}
                   </>
                 ) : settingsSection === "sync" ? (
                   <div className="oss-sync-section">

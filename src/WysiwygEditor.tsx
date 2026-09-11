@@ -10,7 +10,19 @@ import { listItem } from "@milkdown/crepe/feature/list-item";
 import { placeholder } from "@milkdown/crepe/feature/placeholder";
 import { table } from "@milkdown/crepe/feature/table";
 import { topBar } from "@milkdown/crepe/feature/top-bar";
-import { editorViewCtx, editorViewOptionsCtx } from "@milkdown/kit/core";
+import { imageBlockSchema } from "@milkdown/kit/component/image-block";
+import { toggleLinkCommand } from "@milkdown/kit/component/link-tooltip";
+import { commandsCtx, editorViewCtx, editorViewOptionsCtx } from "@milkdown/kit/core";
+import {
+  addBlockTypeCommand,
+  codeBlockSchema,
+  inlineCodeSchema,
+  linkSchema,
+  setBlockTypeCommand,
+  toggleEmphasisCommand,
+  toggleInlineCodeCommand,
+  toggleStrongCommand,
+} from "@milkdown/kit/preset/commonmark";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { supportedCodeLanguages } from "./editorLanguages";
 import { DEFAULT_CODE_BLOCK_TITLE, extractCodeBlockTitles, serializeCodeBlockTitles } from "./codeBlockMetadata";
@@ -34,16 +46,50 @@ import "@milkdown/crepe/theme/frame.css";
 
 const codeWrapCompartment = new Compartment();
 
+export type EditorShortcutCommand = "bold" | "italic" | "inlineCode" | "codeBlock" | "link" | "image";
+
+export type EditorHandle = {
+  getMarkdown: () => string;
+  runShortcut: (command: EditorShortcutCommand) => void;
+};
+
 type WysiwygEditorProps = {
   documentId: string;
   workspaceRoot: string;
   documentPath: string;
   initialValue: string;
   onChange: (markdown: string) => void;
-  onReady: (getMarkdown: (() => string) | null) => void;
+  onReady: (handle: EditorHandle | null) => void;
   onCursorPositionChange: (position: { line: number; column: number }) => void;
   onAssetUploaded: (source?: string) => void;
+  shortcutLabels: Record<EditorShortcutCommand, string>;
 };
+
+const TOP_BAR_ITEMS: Array<{ label: string; command?: EditorShortcutCommand }> = [
+  { label: "加粗", command: "bold" },
+  { label: "斜体", command: "italic" },
+  { label: "删除线" },
+  { label: "行内代码", command: "inlineCode" },
+  { label: "无序列表" },
+  { label: "有序列表" },
+  { label: "任务列表" },
+  { label: "插入链接", command: "link" },
+  { label: "插入图片", command: "image" },
+  { label: "插入表格" },
+  { label: "代码块", command: "codeBlock" },
+  { label: "引用" },
+  { label: "插入分隔线" },
+];
+
+function enhanceTopBarTooltips(root: HTMLElement, shortcutLabels: Record<EditorShortcutCommand, string>) {
+  root.querySelectorAll<HTMLButtonElement>(".milkdown-top-bar .top-bar-item").forEach((button, index) => {
+    const item = TOP_BAR_ITEMS[index];
+    if (!item) return;
+    const title = item.command ? `${item.label}（${shortcutLabels[item.command]}）` : item.label;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+  });
+}
 
 function scrollTopBarWithMouseWheel(event: WheelEvent) {
   const element = event.currentTarget as HTMLElement;
@@ -124,11 +170,14 @@ function WysiwygEditorInner({
   onReady,
   onCursorPositionChange,
   onAssetUploaded,
+  shortcutLabels,
 }: WysiwygEditorProps) {
   const onChangeRef = useRef(onChange);
   const onReadyRef = useRef(onReady);
   const onCursorPositionChangeRef = useRef(onCursorPositionChange);
   const onAssetUploadedRef = useRef(onAssetUploaded);
+  const shortcutLabelsRef = useRef(shortcutLabels);
+  const editorRootRef = useRef<HTMLElement | null>(null);
   const imageUrlCache = useRef(new Map<string, string>());
   const htmlUrlCache = useRef(new Map<string, string>());
 
@@ -147,6 +196,11 @@ function WysiwygEditorInner({
   useEffect(() => {
     onAssetUploadedRef.current = onAssetUploaded;
   }, [onAssetUploaded]);
+
+  useEffect(() => {
+    shortcutLabelsRef.current = shortcutLabels;
+    if (editorRootRef.current) enhanceTopBarTooltips(editorRootRef.current, shortcutLabels);
+  }, [shortcutLabels]);
 
   useEffect(() => () => {
     for (const url of imageUrlCache.current.values()) URL.revokeObjectURL(url);
@@ -402,8 +456,47 @@ function WysiwygEditorInner({
     crepe.on((listener) => {
       listener
         .mounted(() => {
-          onReadyRef.current(() => serializeCodeBlockTitles(crepe.getMarkdown(), readCodeBlockTitles(root)));
+          editorRootRef.current = root;
+          const runShortcut = (command: EditorShortcutCommand) => {
+            crepe.editor.action((ctx) => {
+              const commands = ctx.get(commandsCtx);
+              const view = ctx.get(editorViewCtx);
+              const { state } = view;
+              view.focus();
+
+              if (command === "bold") commands.call(toggleStrongCommand.key);
+              if (command === "italic") commands.call(toggleEmphasisCommand.key);
+              if (command === "inlineCode") {
+                if (state.selection.empty) {
+                  const mark = inlineCodeSchema.type(ctx);
+                  const active = state.storedMarks?.some((item) => item.type === mark)
+                    ?? state.selection.$from.marks().some((item) => item.type === mark);
+                  view.dispatch(active ? state.tr.removeStoredMark(mark) : state.tr.addStoredMark(mark.create()));
+                } else {
+                  commands.call(toggleInlineCodeCommand.key);
+                }
+              }
+              if (command === "codeBlock") {
+                commands.call(setBlockTypeCommand.key, { nodeType: codeBlockSchema.type(ctx) });
+              }
+              if (command === "link") {
+                const mark = linkSchema.type(ctx);
+                const active = state.storedMarks?.some((item) => item.type === mark)
+                  ?? state.selection.$from.marks().some((item) => item.type === mark);
+                if (state.selection.empty && active) view.dispatch(state.tr.removeStoredMark(mark));
+                else commands.call(toggleLinkCommand.key);
+              }
+              if (command === "image") {
+                commands.call(addBlockTypeCommand.key, { nodeType: imageBlockSchema.type(ctx) });
+              }
+            });
+          };
+          onReadyRef.current({
+            getMarkdown: () => serializeCodeBlockTitles(crepe.getMarkdown(), readCodeBlockTitles(root)),
+            runShortcut,
+          });
           topBarElement = root.querySelector<HTMLElement>(".milkdown-top-bar");
+          enhanceTopBarTooltips(root, shortcutLabelsRef.current);
           topBarElement?.addEventListener("wheel", scrollTopBarWithMouseWheel, { passive: false });
           editorScrollElement?.addEventListener("scroll", handleEditorScroll, { passive: true });
           editorScrollElement?.addEventListener("wheel", cancelInputScrollLock, { passive: true });
@@ -451,6 +544,7 @@ function WysiwygEditorInner({
           if (pointerDownRestoreFrame !== null) window.cancelAnimationFrame(pointerDownRestoreFrame);
           pointerDownRestoreFrame = null;
           if (restoreScrollFrame !== null) window.cancelAnimationFrame(restoreScrollFrame);
+          if (editorRootRef.current === root) editorRootRef.current = null;
           onReadyRef.current(null);
         });
     });
@@ -474,5 +568,11 @@ function WysiwygEditor(props: WysiwygEditorProps) {
 
 export default memo(
   WysiwygEditor,
-  (previous, next) => previous.documentId === next.documentId,
+  (previous, next) => previous.documentId === next.documentId
+    && previous.shortcutLabels.bold === next.shortcutLabels.bold
+    && previous.shortcutLabels.italic === next.shortcutLabels.italic
+    && previous.shortcutLabels.inlineCode === next.shortcutLabels.inlineCode
+    && previous.shortcutLabels.codeBlock === next.shortcutLabels.codeBlock
+    && previous.shortcutLabels.link === next.shortcutLabels.link
+    && previous.shortcutLabels.image === next.shortcutLabels.image,
 );

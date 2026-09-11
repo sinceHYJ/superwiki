@@ -560,6 +560,22 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .editor-setting-row input[type="number"] { flex: 0 0 76px; width: 76px; height: 34px; box-sizing: border-box; padding: 0 8px; color: #34352e; font-size: 13px; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; outline: none; }
 .editor-setting-row input[type="number"]:focus { border-color: var(--accent-border); box-shadow: 0 0 0 2px var(--accent-soft); }
 .editor-setting-row input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); cursor: pointer; }
+.shortcut-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.shortcut-reset-all { flex: 0 0 auto; height: 32px; padding: 0 10px; color: #5d6057; font-size: 12px; font-weight: 600; background: #fff; border: 1px solid #dedfd7; border-radius: 7px; cursor: pointer; }
+.shortcut-reset-all:hover { background: #f7f7f2; border-color: #b6b8b0; }
+.shortcut-settings { overflow: hidden; margin-top: 16px; background: #fff; border: 1px solid #dedfd7; border-radius: 9px; }
+.shortcut-setting-row { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 16px; border-top: 1px solid #edede8; }
+.shortcut-settings .editor-settings-heading + .shortcut-setting-row { border-top: 0; }
+.shortcut-setting-row > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
+.shortcut-setting-row strong { color: #42443d; font-size: 13px; font-weight: 600; }
+.shortcut-setting-row small { color: #8a8c83; font-size: 11px; line-height: 1.4; }
+.shortcut-recorder { flex: 0 0 auto; min-width: 112px; height: 32px; padding: 0 10px; color: #44473e; font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #f7f7f2; border: 1px solid #dedfd7; border-radius: 7px; cursor: pointer; }
+.shortcut-recorder:hover, .shortcut-recorder:focus-visible { border-color: var(--accent-border); outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+.shortcut-recorder.recording { color: var(--accent-strong); background: var(--accent-soft); border-color: var(--accent-border); }
+.shortcut-error { margin: 12px 0 0; color: #a13f38; font-size: 12px; line-height: 1.5; }
+.sidebar-reopen-button { position: absolute; z-index: 20; top: 10px; left: 10px; width: 32px; height: 32px; color: #5f6259; background: rgba(255, 255, 255, .94); border: 1px solid #dedfd7; border-radius: 7px; box-shadow: 0 3px 10px rgba(31, 32, 27, .1); }
+.sidebar-reopen-button:hover { color: #24251f; background: #fff; }
+.document-fullscreen .sidebar-reopen-button { display: none; }
 .oss-sync-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .oss-sync-header .settings-section-heading { min-width: 0; }
 .theme-color-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
