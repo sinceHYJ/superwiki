@@ -232,7 +232,7 @@ function App() {
 
     return isThemeColor(storedTheme) ? storedTheme : "sky";
   });
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
   const [creatingEntry, setCreatingEntry] = useState<CreatingEntry | null>(null);
