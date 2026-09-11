@@ -1,0 +1,22 @@
+.app-update-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.app-update-button:hover { background: var(--accent-soft); }
+.app-update-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: #dc3545; box-shadow: 0 0 0 2px #fbfbf8; }
+.app-update-dialog { width: min(700px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding: 22px; border: 1px solid #dedfd9; border-radius: 12px; color: #24251f; background: #fff; box-shadow: 0 20px 70px #0003; font-size: 14px; }
+.app-update-dialog::backdrop { background: #0005; }
+.app-update-dialog header { display: flex; align-items: center; justify-content: space-between; }
+.app-update-dialog h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.app-update-dialog button { padding: 7px 12px; border: 1px solid #dedfd9; border-radius: 6px; background: #fff; color: inherit; cursor: pointer; }
+.app-update-dialog header button { display: flex; border: 0; padding: 4px; }
+.app-update-dialog button:disabled { opacity: .5; cursor: default; }
+.app-update-dialog button:focus-visible, .app-update-dialog a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.app-update-notes { max-height: min(360px, 45vh); overflow: auto; border: 1px solid #e4e5e0; border-radius: 6px; padding: 12px 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.app-update-notes > :first-child { margin-top: 0; }
+.app-update-notes > :last-child { margin-bottom: 0; }
+.app-update-notes h1, .app-update-notes h2, .app-update-notes h3 { font-size: 15px; margin: 12px 0 6px; }
+.app-update-notes pre { overflow: auto; }
+.app-update-notes a { color: var(--accent-link); }
+.app-update-status { font-size: 13px; }
+.app-update-status progress { width: 100%; margin-top: 16px; accent-color: var(--accent-strong); }
+.app-update-error { color: #b42318; overflow-wrap: anywhere; }
+.app-update-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #eee; }
+.app-update-dialog .app-update-primary { background: var(--accent-primary); border-color: var(--accent-primary); color: var(--accent-on-primary); }
