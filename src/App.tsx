@@ -66,6 +66,8 @@ import {
   type OssSyncSettings,
 } from "./ossSync";
 import "./App.css";
+import AppUpdater from "./AppUpdater";
+import { collectUpdateDocuments, createSaveQueue } from "./updateSave";
 
 type FileTreeNode = {
   name: string;
@@ -205,6 +207,10 @@ const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 const OfficePreview = lazy(() => import("./OfficePreview"));
 
 function App() {
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const installingUpdateRef = useRef(false);
+  const openingFilesRef = useRef(0);
+  const [saveQueue] = useState(() => createSaveQueue((document) => invoke<void>("save_workspace_file", document)));
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
   const [openTabs, setOpenTabs] = useState<ActiveFile[]>([]);
@@ -346,7 +352,7 @@ function App() {
     const latestContent = syncEditorContent();
     if (latestContent === loadedContent.current) return;
 
-    await invoke("save_workspace_file", {
+    await saveQueue.write({
       root: file.root,
       path: file.path,
       content: latestContent,
@@ -359,7 +365,30 @@ function App() {
     });
     recordRecentEdit(file);
     queueWorkspaceFileSync(file.root, file.path);
-  }, [autoSave, queueWorkspaceFileSync, recordRecentEdit, syncEditorContent]);
+  }, [autoSave, queueWorkspaceFileSync, recordRecentEdit, saveQueue, syncEditorContent]);
+
+  const prepareUpdateInstall = async () => {
+    if (openingFilesRef.current) throw new Error("文档正在切换，请稍后重试安装。");
+    installingUpdateRef.current = true;
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const currentFile = activeFileRef.current;
+    const latest = syncEditorContent();
+    const documents = collectUpdateDocuments(openTabs, documentDrafts, currentFile, latest);
+    // Keep all drafts until the entire save gate succeeds, including on partial failure.
+    try {
+      await saveQueue.saveBeforeUpdate(documents);
+    } catch (reason) {
+      setDocumentDrafts((drafts) => ({ ...drafts, ...Object.fromEntries(documents.map((file) => [documentDraftKey(file), file.content])) }));
+      setSaveState("error");
+      throw reason;
+    }
+    if (currentFile?.kind === "markdown") loadedContent.current = latest;
+    setDocumentDrafts({});
+    setSaveState("saved");
+  };
 
   const saveCurrentFile = useCallback(async () => {
     try {
@@ -374,6 +403,8 @@ function App() {
   }, [flushPendingSave]);
 
   const openFile = useCallback(async (file: ActiveFile) => {
+    if (installingUpdateRef.current) return false;
+    openingFilesRef.current += 1;
     try {
       setError("");
       const currentFile = activeFileRef.current;
@@ -430,6 +461,8 @@ function App() {
     } catch (reason) {
       setError(String(reason));
       return false;
+    } finally {
+      openingFilesRef.current -= 1;
     }
   }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
@@ -572,12 +605,13 @@ function App() {
   }, [loadWorkspace]);
 
   useEffect(() => {
-    if (!autoSave || !activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
+    if (installingUpdateRef.current || !autoSave || !activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
 
     setSaveState("saving");
     saveTimerRef.current = window.setTimeout(async () => {
+      if (installingUpdateRef.current) return;
       try {
-        await invoke("save_workspace_file", {
+        await saveQueue.write({
           root: activeFile.root,
           path: activeFile.path,
           content,
@@ -602,7 +636,7 @@ function App() {
     return () => {
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     };
-  }, [activeFile, autoSave, content, queueWorkspaceFileSync, recordRecentEdit]);
+  }, [activeFile, autoSave, content, queueWorkspaceFileSync, recordRecentEdit, saveQueue]);
 
   const closeWorkspace = async () => {
     try {
@@ -1255,7 +1289,7 @@ function App() {
       .map((definition) => definition.defaultChord);
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (settingsOpen) return;
+      if (settingsOpen || updateOpen || installingUpdateRef.current) return;
       const chord = chordFromKeyboardEvent(event);
       if (!chord) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -1295,7 +1329,7 @@ function App() {
 
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [changeViewMode, documentFullscreen, enterDocumentFullscreen, saveCurrentFile, settingsOpen, shortcutBindings, toggleActiveFileFavorite, viewMode]);
+  }, [changeViewMode, documentFullscreen, enterDocumentFullscreen, saveCurrentFile, settingsOpen, shortcutBindings, toggleActiveFileFavorite, updateOpen, viewMode]);
 
   const clampSidebarWidth = useCallback((width: number) => {
     const availableWidth = Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
@@ -1412,6 +1446,8 @@ function App() {
           <div className="window-titlebar-drag-region" onMouseDown={handleTitlebarMouseDown} />
           <div className="window-titlebar-actions">
             {titlebarDocumentActions}
+            <AppUpdater currentVersion={appVersion} prepareInstall={prepareUpdateInstall}
+              finishInstall={() => { installingUpdateRef.current = false; }} onOpenChange={setUpdateOpen} />
             <button
               className="settings-button"
               onClick={() => setSettingsOpen(true)}
@@ -1457,6 +1493,8 @@ function App() {
           </div>
           <div className="windows-titlebar-actions">
             {titlebarDocumentActions}
+            <AppUpdater currentVersion={appVersion} prepareInstall={prepareUpdateInstall}
+              finishInstall={() => { installingUpdateRef.current = false; }} onOpenChange={setUpdateOpen} />
             <button
               className="windows-titlebar-settings"
               onClick={() => setSettingsOpen(true)}

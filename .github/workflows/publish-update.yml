@@ -1,0 +1,25 @@
+name: Publish update
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已填写日志的草稿版本，例如 v0.8.0'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: update-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/update-release.mjs publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_TAG: ${{ inputs.tag }}

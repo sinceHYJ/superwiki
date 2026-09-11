@@ -33,5 +33,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/sinceHYJ/superwiki/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      },
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxNjlCMzA1M0IwRTQzMUYKUldRZlF3NDdCYk5wTVdpSCtKZk85T2dVYlRPbVV0cldscHdDR3NMVTJ1eEdUUlAvVWczZTQwcE8K"
+    }
   }
 }
