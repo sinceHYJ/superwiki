@@ -183,10 +183,8 @@ button { font: inherit; }
 }
 
 .windows-titlebar-settings {
-  gap: 7px;
+  width: 32px;
   margin-right: 8px;
-  padding: 0 10px;
-  font-size: 12px;
 }
 
 .windows-titlebar-sidebar-toggle {
@@ -217,21 +215,16 @@ button { font: inherit; }
 
 .window-titlebar-actions .settings-button {
   display: flex;
-  width: auto;
+  width: 28px;
   height: 28px;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
   padding: 0;
   color: var(--ui-muted);
   background: transparent;
   border: 0;
   border-radius: 0;
   cursor: pointer;
-}
-
-.window-titlebar-actions .settings-button span {
-  color: inherit;
-  font-size: 13px;
 }
 
 .window-titlebar-actions .settings-button:hover {
@@ -933,17 +926,13 @@ button.folder-placeholder:hover {
 
 .settings-button {
   display: flex;
-  width: 100%;
+  width: 34px;
   height: 34px;
-  padding: 0 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   color: var(--ui-muted);
   border-radius: 7px;
-  gap: 8px;
-}
-
-.settings-button span {
-  color: var(--ui-muted);
-  font-size: 12px;
 }
 
 .settings-button small {

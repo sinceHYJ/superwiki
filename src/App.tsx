@@ -1419,7 +1419,6 @@ function App() {
               aria-label="打开设置"
             >
               <Settings size={15} />
-              <span>设置</span>
             </button>
           </div>
         </>
@@ -1465,7 +1464,6 @@ function App() {
               aria-label="打开设置"
             >
               <Settings size={15} />
-              <span>设置</span>
             </button>
             <button
               className="windows-titlebar-control"
@@ -1713,7 +1711,6 @@ function App() {
               aria-label="打开设置"
             >
               <Settings size={15} />
-              <span>设置</span>
             </button>
           </div>
         )}
