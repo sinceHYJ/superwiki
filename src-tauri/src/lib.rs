@@ -825,6 +825,8 @@ fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Respo
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            #[cfg(not(target_os = "windows"))]
+            let _ = app;
             #[cfg(target_os = "windows")]
             app.get_webview_window("main")
                 .expect("main window not found")
