@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock3,
   Copy,
+  Eye,
   File,
   FileCode2,
   Folder,
@@ -1433,8 +1434,12 @@ function App() {
         <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
       </button>
       <div className="view-switcher" aria-label="视图模式">
-        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")} title={shortcutTitle("切换到编辑", shortcutBindings.toggleView)}>编辑</button>
-        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")} title={shortcutTitle("切换到预览", shortcutBindings.toggleView)}>预览</button>
+        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")} title={shortcutTitle("切换到编辑", shortcutBindings.toggleView)} aria-label={shortcutTitle("切换到编辑", shortcutBindings.toggleView)}>
+          <Pencil size={15} />
+        </button>
+        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")} title={shortcutTitle("切换到预览", shortcutBindings.toggleView)} aria-label={shortcutTitle("切换到预览", shortcutBindings.toggleView)}>
+          <Eye size={16} />
+        </button>
       </div>
       <button
         className="icon-button document-fullscreen-toggle"
