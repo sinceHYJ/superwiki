@@ -260,6 +260,7 @@ function App() {
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
+  const [pathCopiedNotice, setPathCopiedNotice] = useState(false);
   const [creatingEntry, setCreatingEntry] = useState<CreatingEntry | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -273,6 +274,7 @@ function App() {
   const previewPaneRef = useRef<HTMLElement>(null);
   const saveTimerRef = useRef<number | null>(null);
   const syncTimerRef = useRef<number | null>(null);
+  const pathCopiedNoticeTimerRef = useRef<number | null>(null);
   const pendingSyncFilesRef = useRef(new Map<string, Set<string>>());
   const sidebarResizingRef = useRef(false);
 
@@ -522,6 +524,10 @@ function App() {
 
   useEffect(() => () => {
     if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+  }, []);
+
+  useEffect(() => () => {
+    if (pathCopiedNoticeTimerRef.current !== null) window.clearTimeout(pathCopiedNoticeTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -870,6 +876,12 @@ function App() {
     try {
       setError("");
       await writeText(node.path);
+      setPathCopiedNotice(true);
+      if (pathCopiedNoticeTimerRef.current !== null) window.clearTimeout(pathCopiedNoticeTimerRef.current);
+      pathCopiedNoticeTimerRef.current = window.setTimeout(() => {
+        pathCopiedNoticeTimerRef.current = null;
+        setPathCopiedNotice(false);
+      }, 1000);
     } catch (reason) {
       setError(`无法复制绝对路径：${String(reason)}`);
     }
@@ -1739,6 +1751,8 @@ function App() {
             )}
           </div>
         )}
+
+        {pathCopiedNotice && <div className="path-copied-notice" role="status">已复制到剪切板</div>}
 
         {!HAS_OVERLAY_TITLEBAR && (
           <div className="sidebar-footer">

@@ -331,6 +331,7 @@ button.folder-placeholder:hover { color: #dfe1d7; border-color: #696d60; }
 .directory-context-menu button:hover { background: #f0f2e7; }
 .directory-context-menu button.danger { color: #a13d36; }
 .directory-context-menu button.danger:hover { background: #fff0ee; }
+.path-copied-notice { position: fixed; z-index: 30; bottom: 24px; left: 50%; padding: 8px 12px; color: #fff; font-size: 12px; background: rgba(32, 34, 30, .92); border-radius: 6px; box-shadow: 0 6px 18px rgba(20, 21, 18, .2); transform: translateX(-50%); pointer-events: none; }
 
 .sidebar-footer { display: flex; align-items: center; justify-content: space-between; min-height: 37px; padding: 10px 4px 0 8px; color: #71746b; font-size: 11px; border-top: 1px solid #3a3c36; }
 .settings-button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #8e9187; background: transparent; border: 0; border-radius: 6px; cursor: pointer; }
