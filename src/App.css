@@ -1423,6 +1423,8 @@ button.folder-placeholder:hover {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.document-fullscreen-toggle svg { stroke-width: 3; }
+
 /* Code block controls */
 .wysiwyg-editor .milkdown .milkdown-code-block .tools {
   display: flex;

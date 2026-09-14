@@ -13,7 +13,6 @@ import {
   FileCode2,
   Folder,
   Image as ImageIcon,
-  Maximize2,
   Minimize2,
   Minus,
   FolderOpen,
@@ -25,6 +24,7 @@ import {
   Pencil,
   RefreshCw,
   Save,
+  Scan,
   Search,
   Square,
   Settings,
@@ -1435,7 +1435,7 @@ function App() {
         title={`${fullscreenTitle}；Esc 退出`}
         aria-label={`${fullscreenTitle}；Esc 退出`}
       >
-        <Maximize2 size={18} />
+        <Scan size={19} />
       </button>
       <button
         className={`icon-button outline-toggle ${outlineOpen ? "" : "collapsed"}`}
