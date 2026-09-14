@@ -1386,6 +1386,14 @@ function App() {
     void getCurrentWindow().startDragging();
   };
 
+  const closeWindow = useCallback(async () => {
+    try {
+      await getCurrentWindow().destroy();
+    } catch (reason) {
+      setError(`无法关闭窗口：${String(reason)}`);
+    }
+  }, []);
+
   const handleTabListWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     const tabList = event.currentTarget;
     if (tabList.scrollWidth <= tabList.clientWidth) return;
@@ -1538,7 +1546,7 @@ function App() {
             </button>
             <button
               className="windows-titlebar-control windows-titlebar-close"
-              onClick={() => void getCurrentWindow().close()}
+              onClick={() => void closeWindow()}
               title="关闭"
               aria-label="关闭窗口"
             >
