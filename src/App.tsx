@@ -68,6 +68,7 @@ import {
 import "./App.css";
 import AppUpdater from "./AppUpdater";
 import { collectUpdateDocuments, createSaveQueue } from "./updateSave";
+import { CONTENT_WIDTH_STORAGE_KEY, parseContentWidth, type ContentWidth } from "./contentWidth";
 
 type FileTreeNode = {
   name: string;
@@ -238,6 +239,7 @@ function App() {
   const [shortcutError, setShortcutError] = useState("");
   const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
   const [autoSave, setAutoSave] = useState(readAutoSave);
+  const [contentWidth, setContentWidth] = useState<ContentWidth>(() => parseContentWidth(localStorage.getItem(CONTENT_WIDTH_STORAGE_KEY)));
   const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
   const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
   const [syncState, setSyncState] = useState<SyncState>("idle");
@@ -1941,7 +1943,7 @@ function App() {
         )}
 
         {workspaceView === "document" && activeFile?.kind === "markdown" && (
-          <div className={`editor-layout mode-${documentFullscreen ? "preview" : viewMode} ${outlineOpen ? "" : "outline-hidden"}`}>
+          <div className={`editor-layout mode-${documentFullscreen ? "preview" : viewMode} content-width-${contentWidth} ${outlineOpen ? "" : "outline-hidden"}`}>
             {!documentFullscreen && viewMode !== "preview" && (
               <section ref={editorPaneRef} className="editor-pane" aria-label="Markdown 所见即所得编辑器">
                 <Suspense fallback={<div className="editor-loading">正在加载所见即所得编辑器…</div>}>
@@ -2115,7 +2117,7 @@ function App() {
                   <>
                     <div className="settings-section-heading">
                       <h3>外观</h3>
-                      <p>选择应用的主色调，修改后会立即生效。</p>
+                      <p>选择应用的主色调与内容宽度，修改后会立即生效。</p>
                     </div>
                     <div className="theme-color-grid" role="group" aria-label="主色调">
                       {THEME_COLORS.map((theme) => (
@@ -2134,6 +2136,35 @@ function App() {
                         </button>
                       ))}
                     </div>
+                    <section className="content-width-settings" aria-labelledby="content-width-title">
+                      <div className="editor-settings-heading">
+                        <h4 id="content-width-title">内容宽度</h4>
+                      </div>
+                      <div className="content-width-options" role="group" aria-label="内容宽度">
+                        <button
+                          className={contentWidth === "default" ? "active" : ""}
+                          aria-pressed={contentWidth === "default"}
+                          onClick={() => {
+                            setContentWidth("default");
+                            localStorage.setItem(CONTENT_WIDTH_STORAGE_KEY, "default");
+                          }}
+                        >
+                          <strong>默认</strong>
+                          <small>限制正文宽度，便于长文阅读</small>
+                        </button>
+                        <button
+                          className={contentWidth === "full" ? "active" : ""}
+                          aria-pressed={contentWidth === "full"}
+                          onClick={() => {
+                            setContentWidth("full");
+                            localStorage.setItem(CONTENT_WIDTH_STORAGE_KEY, "full");
+                          }}
+                        >
+                          <strong>全宽</strong>
+                          <small>占满正文面板，保留左右留白</small>
+                        </button>
+                      </div>
+                    </section>
                   </>
                 ) : settingsSection === "shortcuts" ? (
                   <>
