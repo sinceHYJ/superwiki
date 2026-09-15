@@ -1481,6 +1481,8 @@ button.folder-placeholder:hover {
 .sync-details-summary { display: flex; align-items: center; gap: 10px; padding: 12px; background: #f7f7f3; border-radius: 8px; }
 .sync-details-summary > span { display: flex; flex-direction: column; gap: 3px; }
 .sync-details-summary small { color: var(--ui-muted); font-size: 10px; }
+.sync-details-empty { display: flex; min-height: 132px; align-items: center; justify-content: center; flex-direction: column; gap: 14px; text-align: center; }
+.sync-details-empty p { max-width: 360px; margin: 0; color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
 .sync-inherited-note,
 .sync-binding-note { padding: 9px 11px; color: var(--ui-muted); font-size: 11px; background: var(--accent-soft); border-radius: 7px; }
 .sync-detail-actions { margin: 14px 0; }

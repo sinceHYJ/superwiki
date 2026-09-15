@@ -1441,6 +1441,12 @@ function App() {
     }
   };
 
+  const openSyncSettings = () => {
+    setSyncDetailsOpen(false);
+    setSettingsSection("sync");
+    setSettingsOpen(true);
+  };
+
   const activatePendingWorkspace = (tree: WorkspaceTree) => {
     const recentDocuments = filterExistingRecentDocuments(tree, readRecentEditedDocuments(tree.root));
     const favorites = filterExistingFavoriteDocuments(tree, readFavoriteDocuments(tree.root));
@@ -2223,16 +2229,25 @@ function App() {
                 {syncPhaseIcon(syncStatus.phase)}
                 <span><strong>{syncStatus.message}</strong>{syncStatus.remotePath && <small>远端：{syncStatus.remotePath}</small>}</span>
               </div>
-              {syncStatus.inheritedFrom && <p className="sync-inherited-note">继承自工作区：{syncStatus.inheritedFrom}</p>}
-              <div className="sync-detail-actions">
-                {(syncStatus.phase === "syncing" || syncStatus.phase === "checking") && <button onClick={() => syncController.cancel()}>取消同步</button>}
-                {syncStatus.phase === "paused" && <button className="primary" onClick={() => void syncController.resume()}>恢复同步</button>}
-                {syncStatus.phase !== "syncing" && syncStatus.phase !== "checking" && syncStatus.phase !== "paused" && <button className="primary" onClick={() => void syncCurrentWorkspace()}>立即同步</button>}
-              </div>
-              <div className="sync-activity-list">
-                {syncStatus.activities.map((activity, index) => <div key={`${activity.action}:${activity.path}:${index}`}><strong>{activity.message}</strong><span>{activity.path}</span></div>)}
-                {!syncStatus.activities.length && <p>暂无同步记录</p>}
-              </div>
+              {syncStatus.phase === "disabled" ? (
+                <div className="sync-details-empty">
+                  <p>{ossSyncSettings ? "当前工作区的同步已关闭，请在同步设置中启用。" : "当前工作区尚未配置同步，请先在同步设置中连接 OSS。"}</p>
+                  <button className="primary" onClick={openSyncSettings}>打开同步设置</button>
+                </div>
+              ) : (
+                <>
+                  {syncStatus.inheritedFrom && <p className="sync-inherited-note">继承自工作区：{syncStatus.inheritedFrom}</p>}
+                  <div className="sync-detail-actions">
+                    {(syncStatus.phase === "syncing" || syncStatus.phase === "checking") && <button onClick={() => syncController.cancel()}>取消同步</button>}
+                    {syncStatus.phase === "paused" && <button className="primary" onClick={() => void syncController.resume()}>恢复同步</button>}
+                    {syncStatus.phase !== "syncing" && syncStatus.phase !== "checking" && syncStatus.phase !== "paused" && <button className="primary" onClick={() => void syncCurrentWorkspace()}>立即同步</button>}
+                  </div>
+                  <div className="sync-activity-list">
+                    {syncStatus.activities.map((activity, index) => <div key={`${activity.action}:${activity.path}:${index}`}><strong>{activity.message}</strong><span>{activity.path}</span></div>)}
+                    {!syncStatus.activities.length && <p>暂无同步记录</p>}
+                  </div>
+                </>
+              )}
             </div>
           </section>
         </div>
