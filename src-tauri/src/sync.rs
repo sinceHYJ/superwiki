@@ -516,13 +516,18 @@ fn scan(
 }
 
 #[tauri::command]
-pub fn scan_workspace_sync(root: String) -> Result<LocalSyncSnapshot, String> {
-    let root = canonical_directory(&root)?;
-    let mut entries = Vec::new();
-    let mut skipped = Vec::new();
-    scan(&root, &root, &mut entries, &mut skipped)?;
-    entries.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(LocalSyncSnapshot { entries, skipped })
+pub async fn scan_workspace_sync(root: String) -> Result<LocalSyncSnapshot, String> {
+    // 全量扫描会对每个文件做 SHA-256，必须放到阻塞线程池，避免冻结主线程。
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = canonical_directory(&root)?;
+        let mut entries = Vec::new();
+        let mut skipped = Vec::new();
+        scan(&root, &root, &mut entries, &mut skipped)?;
+        entries.sort_by(|left, right| left.path.cmp(&right.path));
+        Ok(LocalSyncSnapshot { entries, skipped })
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn checked_relative(relative: &str) -> Result<PathBuf, String> {
@@ -562,7 +567,7 @@ fn safe_target(root: &Path, relative: &str, create_parents: bool) -> Result<Path
 }
 
 #[tauri::command]
-pub fn read_workspace_sync_chunk(
+pub async fn read_workspace_sync_chunk(
     root: String,
     path: String,
     offset: u64,
@@ -597,7 +602,7 @@ pub fn begin_workspace_sync_write(app: tauri::AppHandle) -> Result<String, Strin
 }
 
 #[tauri::command]
-pub fn write_workspace_sync_chunk(
+pub async fn write_workspace_sync_chunk(
     app: tauri::AppHandle,
     token: String,
     offset: u64,
@@ -613,7 +618,7 @@ pub fn write_workspace_sync_chunk(
 }
 
 #[tauri::command]
-pub fn commit_workspace_sync_write(
+pub async fn commit_workspace_sync_write(
     app: tauri::AppHandle,
     root: String,
     path: String,
@@ -634,7 +639,10 @@ pub fn commit_workspace_sync_write(
 }
 
 #[tauri::command]
-pub fn cancel_workspace_sync_write(app: tauri::AppHandle, token: String) -> Result<(), String> {
+pub async fn cancel_workspace_sync_write(
+    app: tauri::AppHandle,
+    token: String,
+) -> Result<(), String> {
     let path = temp_path(&app, &token)?;
     if path.exists() {
         fs::remove_file(path).map_err(|error| error.to_string())?;
@@ -643,12 +651,15 @@ pub fn cancel_workspace_sync_write(app: tauri::AppHandle, token: String) -> Resu
 }
 
 #[tauri::command]
-pub fn hash_workspace_sync_temp(app: tauri::AppHandle, token: String) -> Result<String, String> {
+pub async fn hash_workspace_sync_temp(
+    app: tauri::AppHandle,
+    token: String,
+) -> Result<String, String> {
     hash_file(&temp_path(&app, &token)?).map(|(hash, _)| hash)
 }
 
 #[tauri::command]
-pub fn create_workspace_sync_directory(root: String, path: String) -> Result<(), String> {
+pub async fn create_workspace_sync_directory(root: String, path: String) -> Result<(), String> {
     let root = canonical_directory(&root)?;
     let target = safe_target(&root, &path, true)?;
     if target.exists() && !target.is_dir() {
@@ -658,7 +669,7 @@ pub fn create_workspace_sync_directory(root: String, path: String) -> Result<(),
 }
 
 #[tauri::command]
-pub fn delete_workspace_sync_entry(root: String, path: String) -> Result<(), String> {
+pub async fn delete_workspace_sync_entry(root: String, path: String) -> Result<(), String> {
     let root = canonical_directory(&root)?;
     let target = safe_target(&root, &path, false)?;
     if !target.exists() {
@@ -691,7 +702,7 @@ fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn copy_workspace_sync_entry(
+pub async fn copy_workspace_sync_entry(
     root: String,
     source: String,
     destination: String,
@@ -721,7 +732,7 @@ fn baseline_path(app: &tauri::AppHandle, binding_id: &str) -> Result<PathBuf, St
 }
 
 #[tauri::command]
-pub fn load_sync_baseline(
+pub async fn load_sync_baseline(
     app: tauri::AppHandle,
     binding_id: String,
 ) -> Result<Option<serde_json::Value>, String> {
@@ -735,7 +746,7 @@ pub fn load_sync_baseline(
 }
 
 #[tauri::command]
-pub fn save_sync_baseline(
+pub async fn save_sync_baseline(
     app: tauri::AppHandle,
     binding_id: String,
     baseline: serde_json::Value,
