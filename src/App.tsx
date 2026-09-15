@@ -9,11 +9,11 @@ import {
   ChevronRight,
   Clock3,
   Copy,
+  Eye,
   File,
   FileCode2,
   Folder,
   Image as ImageIcon,
-  Minimize2,
   Minus,
   FolderOpen,
   Info,
@@ -1386,6 +1386,14 @@ function App() {
     void getCurrentWindow().startDragging();
   };
 
+  const closeWindow = useCallback(async () => {
+    try {
+      await getCurrentWindow().destroy();
+    } catch (reason) {
+      setError(`无法关闭窗口：${String(reason)}`);
+    }
+  }, []);
+
   const handleTabListWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     const tabList = event.currentTarget;
     if (tabList.scrollWidth <= tabList.clientWidth) return;
@@ -1426,8 +1434,12 @@ function App() {
         <Star size={17} fill={activeFileFavorited ? "currentColor" : "none"} />
       </button>
       <div className="view-switcher" aria-label="视图模式">
-        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")} title={shortcutTitle("切换到编辑", shortcutBindings.toggleView)}>编辑</button>
-        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")} title={shortcutTitle("切换到预览", shortcutBindings.toggleView)}>预览</button>
+        <button className={viewMode === "editor" ? "active" : ""} onClick={() => changeViewMode("editor")} title={shortcutTitle("切换到编辑", shortcutBindings.toggleView)} aria-label={shortcutTitle("切换到编辑", shortcutBindings.toggleView)}>
+          <Pencil size={15} />
+        </button>
+        <button className={viewMode === "preview" ? "active" : ""} onClick={() => changeViewMode("preview")} title={shortcutTitle("切换到预览", shortcutBindings.toggleView)} aria-label={shortcutTitle("切换到预览", shortcutBindings.toggleView)}>
+          <Eye size={16} />
+        </button>
       </div>
       <button
         className="icon-button document-fullscreen-toggle"
@@ -1534,11 +1546,11 @@ function App() {
               title={windowMaximized ? "还原" : "最大化"}
               aria-label={windowMaximized ? "还原窗口" : "最大化窗口"}
             >
-              {windowMaximized ? <Minimize2 size={14} /> : <Square size={14} />}
+              {windowMaximized ? <Copy size={14} /> : <Square size={14} />}
             </button>
             <button
               className="windows-titlebar-control windows-titlebar-close"
-              onClick={() => void getCurrentWindow().close()}
+              onClick={() => void closeWindow()}
               title="关闭"
               aria-label="关闭窗口"
             >
