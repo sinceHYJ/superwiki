@@ -54,7 +54,11 @@ export class OssSyncProvider implements SyncProvider {
     const entries: RemoteEntry[] = [];
     let marker: string | undefined;
     do {
-      const result = await this.client.list({ prefix: queryPrefix, marker, "max-keys": 1000 }, {});
+      // V4 签名会把值为 undefined 的查询参数算进规范查询串，而实际请求会丢掉它，
+      // 导致 SignatureDoesNotMatch；首页查询必须不带 marker 键。
+      const query: { prefix: string; marker?: string; "max-keys": number } = { prefix: queryPrefix, "max-keys": 1000 };
+      if (marker) query.marker = marker;
+      const result = await this.client.list(query, {});
       for (const object of result.objects ?? []) {
         const relative = this.root ? object.name.slice(this.root.length).replace(/^\//, "") : object.name;
         if (!relative || relative.startsWith(`${INTERNAL_DIRECTORY}/`)) continue;
