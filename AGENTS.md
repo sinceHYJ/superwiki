@@ -310,3 +310,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 - Commit Message 格式：`<type>: <description>`。
 - 常用类型：`feat`、`fix`、`refactor`、`test`、`docs`、`chore`。
 - `node_modules/`、`dist/` 和 `src-tauri/target/` 不得提交。
+
+## 10. 规则索引
+
+- [代码注释规范](docs/rules/code-rules.MD)：文件、函数、枚举、结构体/类变量、字典/Map 以及函数内部关键步骤和判断的注释要求。
