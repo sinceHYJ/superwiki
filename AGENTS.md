@@ -313,4 +313,5 @@ cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 
 ## 10. 规则索引
 
+- [项目架构](docs/ARCHITECTURE.md)：项目目录、组件边界、数据流、存储、外部集成、部署和安全约束。
 - [代码注释规范](docs/rules/code-rules.MD)：文件、函数、枚举、结构体/类变量、字典/Map 以及函数内部关键步骤和判断的注释要求。
