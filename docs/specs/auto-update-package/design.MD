@@ -172,7 +172,7 @@ flowchart LR
 | `.github/workflows/build-update.yml` | Windows 矩阵 | `windows-latest`、`x86_64-pc-windows-msvc`、`nsis,msi` | 生成 Windows x64 的 NSIS 和 MSI。 |
 | `.github/workflows/build-update.yml` | macOS 矩阵 | `macos-latest`、`universal-apple-darwin`、`app,dmg` | 生成 Universal macOS App/DMG，并额外安装 `aarch64-apple-darwin` 与 `x86_64-apple-darwin` 目标。 |
 | `.github/workflows/build-update.yml` | Node / Rust Action | `actions/setup-node@v4` + `node-version: '24'`；`dtolnay/rust-toolchain@stable` | CI 构建环境。 |
-| `.github/workflows/build-update.yml` | 构建前命令 | `npm ci`；`node .agents/skills/superwiki-release/scripts/sync-version.mjs --check`；`node scripts/update-release.mjs check-tag`；`npm run test:updates` | 安装依赖、校验版本、校验标签、运行测试。第三项引用不存在的文件，导致后续命令不会执行。 |
+| `.github/workflows/build-update.yml` | 构建前命令 | `npm ci`；`node .agents/skills/superwiki-release/scripts/sync-version.mjs --check`；`node scripts/update-release.mjs check-tag`；`npm run test:updates` | 安装依赖、校验版本、校验标签、运行测试。`update-release.mjs` 已恢复；任何一步失败都会阻止构建。 |
 | `.github/workflows/build-update.yml` | `tauri-action` | `tauri-apps/tauri-action@v0` | 仅构建，不创建或上传 Release。使用浮动标签而非 commit SHA。 |
 | `.github/workflows/build-update.yml` | `tauri-action.with.includeUpdaterJson` | `false` | 禁用 Action 自动生成/上传 `latest.json`，设计上交给汇总脚本统一生成。 |
 | `.github/workflows/build-update.yml` | `tauri-action.with.args` | `--target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json` | 按矩阵构建，并叠加生成更新工件的配置。 |
@@ -303,6 +303,53 @@ PUB -> SCRIPT: publish
 SCRIPT -> REL: 公开草稿并设为 Latest
 @enduml
 ```
+
+### 4.5 核心流程设计与方案实现
+
+#### 启动时发现新版本
+
+1. [AppUpdater.tsx:AppUpdater](/Users/administrator/cp/project/superwiki/src/AppUpdater.tsx:17) 仅在 Tauri 桌面运行时调用模块级 `updater.start()`；`start()` 用 `started` 标记保证一次应用生命周期只自动检查一次，避免组件重挂载重复请求。
+2. [updateController.ts:check](/Users/administrator/cp/project/superwiki/src/updateController.ts:40) 调用 `@tauri-apps/plugin-updater` 的 `check({ timeout: 15000 })`。官方 Updater 按 [src-tauri/tauri.conf.json](/Users/administrator/cp/project/superwiki/src-tauri/tauri.conf.json:39) 的 `endpoints` 请求 GitHub 最新正式 Release 中的 `latest.json`，并以本地应用版本与清单 `version` 比较。
+3. 没有更高版本时，`check()` 返回 `null`，状态机进入 `latest`；有更新时返回 `Update` 句柄，控制器保存版本和更新日志并进入 `available`。客户端额外拒绝含 `-` 的预发布版本，防止错误的 beta/rc 清单进入正式用户更新通道。
+4. `available` 状态携带 `state.version`，[AppUpdater.tsx:AppUpdater](/Users/administrator/cp/project/superwiki/src/AppUpdater.tsx:60) 便展示标题栏红点；用户点击后打开弹窗，可再次手动执行 `check()`。检查失败保留已有可用更新句柄；无句柄时回到 `idle` 并显示错误，用户可重试。
+
+```text
+应用启动 → updater.start() → check(timeout=15s)
+  → GitHub Releases/latest.json → Tauri Updater 比较版本
+  → null：latest
+  → Update：available（版本、notes）→ 标题栏红点 → 用户打开更新弹窗
+```
+
+#### 更新日志的生成、传递与展示
+
+1. 标签构建完成后，[scripts/update-release.mjs:draft](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:40) 汇总 Windows 和 macOS 的更新工件及 `.sig` 签名，生成初始 `latest.json`。此时 `notes` 是占位文本，Release 仍是草稿，尚不会被稳定版客户端作为最新公开更新读取。
+2. 维护者在 GitHub 草稿 Release 中填写更新日志，再手动运行发布工作流。[scripts/update-release.mjs:publish](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:68) 会拒绝空日志或占位日志；校验 manifest、资产和签名后，将 Release 正文写入 `latest.json.notes`，增加 `pub_date`，覆盖上传 manifest，最后公开 Release 并设为 Latest。
+3. 下次客户端检查时，Tauri Updater 将 `latest.json.notes` 映射到 `Update.body`；[updateController.ts:check](/Users/administrator/cp/project/superwiki/src/updateController.ts:40) 把它保存为 `state.notes`。弹窗使用 `react-markdown` 与 `remark-gfm` 渲染 Markdown，空文本时显示“此版本暂无更新日志”。链接点击通过 Opener 在系统浏览器打开，图片不加载为远程资源，只显示 `alt` 文本。
+
+```text
+草稿 Release 正文 → publish() 校验 → latest.json.notes → GitHub Latest Release
+  → Tauri Updater 的 Update.body → state.notes → ReactMarkdown 更新日志区域
+```
+
+#### GitHub Actions 打包、审核与发布
+
+1. 维护者推送 `vX.Y.Z` 标签，`.github/workflows/build-update.yml` 触发 `Build update draft`。工作流先执行版本一致性检查、稳定标签检查和更新测试；标签模式仅负责触发，`stableVersion()` 与 `check-tag` 负责阻断非稳定版本或标签、`package.json.version` 不一致的发布。
+2. `build` Job 使用矩阵并行构建 Windows x64（NSIS、MSI）及 macOS Universal（App、DMG）。`tauri-action` 按 `tauri.release.conf.json` 生成 Updater 归档和签名，构建产物以 `update-windows`、`update-macos` 作为 Actions Artifact 上传。
+3. 两个平台成功后，`draft` Job 下载全部 Artifact 并执行 `update-release.mjs draft`：校验每个平台唯一工件和签名，创建 GitHub Draft Release，上传安装包、签名和 `latest.json`。`includeUpdaterJson: false` 确保只有汇总 Job 写 manifest，避免矩阵并行产生冲突。
+4. 草稿 Release 由维护者审核并填写更新日志；`.github/workflows/publish-update.yml` 只能手动触发，输入目标标签后执行 `update-release.mjs publish`。该步骤复核 Release 草稿状态、更新日志、三平台 URL、资产和签名，随后公开 Release；公开后的 `latest.json` 才成为客户端启动检查的更新源。
+
+```text
+push vX.Y.Z
+  → Build update draft（Windows / macOS）
+  → Actions Artifacts
+  → draft：生成签名 manifest 与 Draft Release
+  → 维护者填写 changelog
+  → Publish update（手动）
+  → 校验并公开 Latest Release
+  → 客户端下次启动读取 latest.json
+```
+
+该流程的配置和本地测试已就绪，但尚未以真实 GitHub Actions 产物完成端到端验收；macOS 代码签名和公证机密也仍未配置，不能据此推断正式 macOS 发布已经可用。
 
 ## 5. 技术决策与 Trade-off
 
