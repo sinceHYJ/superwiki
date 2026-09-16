@@ -1,12 +1,12 @@
 # 自动更新与 GitHub Actions 打包发布技术方案
 
-> 设计基线：当前工作树 `0.8.3`。本文区分“已在代码中实现”“已写入工作流但未能执行”和“计划/缺失”，不将已删除的脚本描述为现有能力。
+> 设计基线：当前工作树 `0.8.3`。本文区分“已在代码中实现”“已配置但尚未端到端验收”和“未实现”，不将未经实际 GitHub Actions 验收的流程描述为已发布能力。
 
 ## 1. 方案概览
 
 桌面端采用 Tauri v2 官方 Updater，而不是自建更新服务。客户端从 GitHub Releases 的静态 `latest.json` 读取稳定版本信息，使用内置公钥验证更新包签名；下载完成后，先把所有未保存的 Markdown 文档串行落盘，再调用 Updater 安装并重启。
 
-打包流程以 Git 标签为入口：Windows 与 macOS 在 GitHub Actions 矩阵中分别构建、签名并上传临时工件，理论上随后汇总为草稿 Release，再由手动工作流公开发布。当前汇总/发布脚本 `scripts/update-release.mjs` 已缺失，所以这条 CI/CD 链路在构建前校验阶段即被阻断；客户端方案不依赖该脚本，但无法获得新的可用更新包。
+打包流程以 Git 标签为入口：Windows 与 macOS 在 GitHub Actions 矩阵中分别构建、签名并上传临时工件，随后由 `scripts/update-release.mjs` 汇总为草稿 Release，再由手动工作流公开发布。该脚本已按删除前受审版本恢复，且本地更新测试已通过；恢复后尚未执行真实 GitHub Actions，因此 CI/CD 仍待端到端验收。
 
 ### 架构图（Mermaid）
 
@@ -69,30 +69,23 @@ flowchart LR
     ART --> DRAFT[草稿 Release 汇总]
     DRAFT --> PUBLISH["Publish update<br/>手动发布"]
   end
-  BUILD -. 当前被缺失脚本阻断 .-> MISSING["scripts/update-release.mjs<br/>不存在"]
-  DRAFT -. 当前被缺失脚本阻断 .-> MISSING
-  PUBLISH -. 当前被缺失脚本阻断 .-> MISSING
   PUBLISH --> GH
 
   subgraph Legend[颜色图例]
     LEGEND_CODE[项目代码逻辑]
     LEGEND_MIDDLEWARE[Tauri 中间件]
     LEGEND_EXTERNAL[外部服务 / 平台]
-    LEGEND_ERROR[当前阻断项]
   end
 
   classDef code fill:#DBEAFE,stroke:#2563EB,color:#1E3A8A,stroke-width:2px
   classDef middleware fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
   classDef external fill:#DCFCE7,stroke:#16A34A,color:#14532D,stroke-width:2px
-  classDef error fill:#FEE2E2,stroke:#DC2626,color:#7F1D1D,stroke-width:2px
   class START,UI,CTRL,CHECK,STABLE,LATEST,REJECT,AVAILABLE,DOT,DIALOG,DOWNLOAD,PROGRESS,READY,INSTALL,SAVE,APP code
   class TUP,PROC middleware
   class GH,FS,TAG,BUILD,ART,DRAFT,PUBLISH external
-  class MISSING error
   class LEGEND_CODE code
   class LEGEND_MIDDLEWARE middleware
   class LEGEND_EXTERNAL external
-  class LEGEND_ERROR error
 ```
 
 ## 2. 依赖与开源组件
@@ -126,7 +119,7 @@ flowchart LR
 | 文件 | 字段 / 配置项 | 当前值 | 说明 |
 | --- | --- | --- | --- |
 | `package.json` | `version` | `0.8.3` | 前端应用版本；发布标签和其他版本文件必须一致。 |
-| `package.json` | `scripts.test:updates` | `node --test tests/updates.test.mjs` | 更新控制器、保存队列及发布清单校验的 Node 测试入口。当前因缺失脚本失败。 |
+| `package.json` | `scripts.test:updates` | `node --test tests/updates.test.mjs` | 更新控制器、保存队列及发布清单校验的 Node 测试入口；恢复脚本后当前 8 项测试均通过。 |
 | `package.json` | `dependencies.@tauri-apps/plugin-updater` | `^2.11.0` | 前端 Updater SDK。 |
 | `package.json` | `dependencies.@tauri-apps/plugin-process` | `^2.3.1` | 前端重启 SDK。 |
 | `package.json` | `dependencies.@tauri-apps/plugin-opener` | `^2.5.5` | 前端外链打开 SDK。 |
@@ -188,15 +181,15 @@ flowchart LR
 | `.github/workflows/build-update.yml` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | `${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}` | 可选机密；若私钥加密则必须设置。当前是否在 GitHub 仓库设置无法由本地代码验证。 |
 | `.github/workflows/build-update.yml` | Apple 相关变量 | `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` 全部为注释行 | 未注入 Runner，因此未启用 macOS 代码签名/公证。 |
 | `.github/workflows/build-update.yml` | 上传工件 | 名称 `update-${{ matrix.os }}`；路径为 `**/*.exe`、`**/*.msi`、`**/*.dmg`、`**/*.app.tar.gz`、`**/*.sig`；`if-no-files-found: error` | 将两个构建 Job 的产物交给草稿 Job；缺任一匹配文件即失败。 |
-| `.github/workflows/build-update.yml` | `jobs.draft` | `needs: build`、`ubuntu-latest`、`contents: write` | 仅在两个构建都成功后下载 `update-*` 工件，并调用缺失脚本的 `draft` 子命令。 |
+| `.github/workflows/build-update.yml` | `jobs.draft` | `needs: build`、`ubuntu-latest`、`contents: write` | 仅在两个构建都成功后下载 `update-*` 工件，并调用已恢复脚本的 `draft` 子命令。 |
 | `.github/workflows/build-update.yml` | `jobs.draft.env.GH_TOKEN` | `${{ github.token }}` | GitHub 自动提供的临时 Token，用于创建草稿 Release；实际值不应记录或输出。 |
 | `.github/workflows/publish-update.yml` | `name` / `on` | `Publish update` / `workflow_dispatch` | 仅可从 Actions UI 或 API 手动触发。 |
 | `.github/workflows/publish-update.yml` | `inputs.tag` | 必填 `string`；说明示例 `v0.8.0` | 操作者指定已填写更新日志的草稿标签。 |
 | `.github/workflows/publish-update.yml` | `permissions.contents` | `write` | 允许修改 Release。 |
 | `.github/workflows/publish-update.yml` | `concurrency.group` / `cancel-in-progress` | `update-${{ inputs.tag }}` / `false` | 与同标签构建互斥。 |
-| `.github/workflows/publish-update.yml` | 发布命令及环境 | `node scripts/update-release.mjs publish`；`GH_TOKEN=${{ github.token }}`；`UPDATE_TAG=${{ inputs.tag }}` | 目标是公开草稿；因为脚本不存在，当前 Job 必定失败。 |
+| `.github/workflows/publish-update.yml` | 发布命令及环境 | `node scripts/update-release.mjs publish`；`GH_TOKEN=${{ github.token }}`；`UPDATE_TAG=${{ inputs.tag }}` | 使用已恢复脚本校验并公开草稿；尚待在 GitHub Actions 实际执行验证。 |
 
-`latest.json` 是客户端请求的更新元数据，但当前工作树没有生成该文件的实现，也不存在可校验的字段实例。不能据此断言其实际 `version`、`notes`、`pub_date`、`platforms`、下载 URL 或签名值。恢复发布脚本后，应基于 Tauri 官方 manifest 格式重新记录最终字段。
+`latest.json` 由 `scripts/update-release.mjs:draft` 生成：初始字段为 `version`、占位 `notes` 和 `platforms`；`platforms` 固定包含 `windows-x86_64`、`darwin-x86_64`、`darwin-aarch64`，每项包含 GitHub Release 下载 `url` 与对应 `.sig` 文件内容的 `signature`。`publish` 会校验资产和签名一致，再将草稿正文写入 `notes`、写入 ISO 8601 格式的 `pub_date`，随后覆盖上传 manifest 并公开 Release。真实 Release 资产尚未生成，故不能在本文提供具体 URL、签名或时间戳。
 
 ## 4. 流程、算法与模块调用
 
@@ -230,10 +223,10 @@ flowchart LR
 | `src/updateSave.ts:createSaveQueue` | `write: (document: UpdateDocument) => Promise<void>` | 返回串行写队列：普通写入挂到 `pending` 后；安装前写入先等待已在途任务，再逐项写入。 |
 | `src/updateSave.ts:saveBeforeUpdate` | `documents: UpdateDocument[]` | 伪代码：`await pending; for (document of documents) await write(document)`；任何一项失败立即中断，不进入安装。 |
 | `src/App.tsx:prepareUpdateInstall` | 无 | 禁止正在切换文件时安装；取消自动保存定时器；同步编辑器；收集草稿并调用 `saveBeforeUpdate`；失败时恢复草稿和错误状态。 |
-| `scripts/update-release.mjs:check-tag` | 工作流命令行子命令 | **文件不存在，无法审查实现。**工作流意图是在 Tauri 构建前验证稳定标签。 |
-| `scripts/update-release.mjs:draft` | 工作流命令行子命令 | **文件不存在，无法审查实现。**工作流意图是汇总工件并创建草稿 Release。 |
-| `scripts/update-release.mjs:publish` | 工作流命令行子命令；环境变量 `UPDATE_TAG` | **文件不存在，无法审查实现。**工作流意图是校验草稿并公开发布。 |
-| `scripts/update-release.mjs:stableVersion`、`validateManifest` | 测试期望的 `(tag)`、`(manifest, tag, assetNames)` | `tests/updates.test.mjs` 仍在导入这两个函数，但目标文件缺失；仅能确认测试期望存在，不能把其逻辑当成现有实现。 |
+| `scripts/update-release.mjs:check-tag` | 工作流命令行子命令；`GITHUB_REF_NAME` 或 `UPDATE_TAG` | 仅接受稳定版 `vX.Y.Z`，并校验去除 `v` 后的标签版本与 `package.json.version` 一致。 |
+| `scripts/update-release.mjs:draft` | 工作流命令行子命令；`GITHUB_REF_NAME` 或 `UPDATE_TAG` | 收集 `update-artifacts`，要求唯一的 NSIS、Universal macOS 归档、DMG、MSI 及签名；生成并校验 `latest.json`，再创建草稿 Release 和上传资产。 |
+| `scripts/update-release.mjs:publish` | 工作流命令行子命令；环境变量 `UPDATE_TAG` | 读取草稿及资产，拒绝预发布或占位更新日志，下载 manifest 与签名并校验，写入正式更新日志和 `pub_date` 后公开 Release。 |
+| `scripts/update-release.mjs:stableVersion`、`validateManifest` | `(tag: string)`；`(manifest, tag, assetNames)` | `stableVersion` 仅接受稳定版标签；`validateManifest` 校验版本、三平台条目、GitHub 下载 URL、资产存在性和签名。两者由更新测试覆盖。 |
 
 ### 4.3 客户端调用图（PlantUML）
 
@@ -299,13 +292,7 @@ TAG -> BUILD: 触发 Windows/macOS 矩阵
 BUILD -> SYNC: --check
 SYNC --> BUILD: 版本一致
 BUILD -> SCRIPT: check-tag
-note right of SCRIPT
-当前文件缺失：
-流程在此失败
-end note
-SCRIPT ->x BUILD: ERR_MODULE_NOT_FOUND
-
-== 恢复脚本后预期流程 ==
+SCRIPT --> BUILD: 标签与 package.json 版本一致
 BUILD -> TAURI: 构建、生成更新工件、签名
 TAURI -> ART: upload update-windows / update-macos
 ART -> DRAFT: download update-*
@@ -329,15 +316,13 @@ SCRIPT -> REL: 公开草稿并设为 Latest
 | Windows 使用 `passive` 安装模式 | 在默认安装器体验与较少交互之间折中。 | 安装步骤相对简洁。 | 仍可能显示安装器 UI；需要在真实 Windows 机器验收。 |
 | macOS 使用 Universal 构建 | 一个更新归档覆盖 Intel 和 Apple Silicon。 | Release 资产更少，客户端平台匹配更简单。 | macOS 构建耗时与 Runner 成本更高；未完成 Apple 签名/公证。 |
 | 构建和发布拆分 | 先让维护者审阅草稿与更新日志，再公开。 | 降低错误标签或不完整资产直接发布的概率；避免矩阵并行写同一 Release。 | 操作多一步；依赖汇总脚本正确存在。 |
-| 禁用 `tauri-action` 自动 `latest.json` | 设计上由单一汇总阶段生成 manifest，避免矩阵并行写同一 `latest.json` 的竞态。 | 将 Release 资产和 manifest 校验集中。 | 自定义汇总脚本成为关键单点；当前该脚本缺失，发布链路完全不可用。 |
+| 禁用 `tauri-action` 自动 `latest.json` | 设计上由单一汇总阶段生成 manifest，避免矩阵并行写同一 `latest.json` 的竞态。 | 将 Release 资产和 manifest 校验集中；恢复后的脚本会校验三平台、URL、资产和签名。 | 自定义汇总脚本是关键依赖；虽已恢复，仍需要真实 GitHub Actions 验证。 |
 
 ## 6. 当前 Debug、缺陷与限制
 
-### 已确认的阻断缺陷
+### 已修复的阻断缺陷
 
-1. **`scripts/update-release.mjs` 被删除但工作流和测试仍引用它。**Git 历史显示该文件在提交 `66393a2`（`chore: 删除旧构建与发布脚本`）被删除；当前 `build-update.yml` 的 `check-tag`、`draft`，`publish-update.yml` 的 `publish` 以及 `tests/updates.test.mjs` 的导入均依赖它。
-2. **可复现结果：**运行 `npm run test:updates` 会报 `ERR_MODULE_NOT_FOUND`，定位到 `scripts/update-release.mjs`。标签工作流也会在执行 `node scripts/update-release.mjs check-tag` 时失败，尚未进入 Tauri 打包步骤。
-3. **修复方向：**从删除前的受审版本恢复该脚本，或重新实现并补足 `check-tag`、`draft`、`publish`、`stableVersion`、`validateManifest`。恢复后先运行 `npm run test:updates`，再用非生产标签在 GitHub Actions 验证双平台工件和草稿流程；在脚本恢复前不应推送发布标签。
+`scripts/update-release.mjs` 曾在提交 `66393a2` 被删除，但工作流与测试仍引用它，导致 `npm run test:updates` 报 `ERR_MODULE_NOT_FOUND`，并会使标签工作流停在 `check-tag`。该脚本现已按删除前受审版本恢复，包含 `check-tag`、`draft`、`publish`、`stableVersion`、`validateManifest`；`npm run test:updates` 已通过 8/8。
 
 ### 其他限制与风险
 
@@ -349,7 +334,7 @@ SCRIPT -> REL: 公开草稿并设为 Latest
 | GitHub 网络依赖 | 更新源和下载资产均指向公开 GitHub；断网、限流、区域网络问题会导致检查或下载失败。 | 保留当前错误与重试入口；如需企业级可用性，再评估镜像/自建更新源。 |
 | 无下载续传 | 更新进度仅存在进程内存，退出后从头开始下载。 | 若安装包较大，再评估官方 API 支持范围或引入受控缓存；当前未实现。 |
 | 无 beta/灰度渠道 | 客户端拒绝带 `-` 的版本，并只读取 Latest Release。 | 若需内测，增加独立 endpoint/渠道配置，不应放宽稳定版过滤后直接面向正式用户。 |
-| 更新元数据不可审计 | 生成 `latest.json` 的脚本缺失，最终 manifest 字段、资产选择和签名关联无法复核。 | 恢复脚本并为生成 manifest 增加 fixture 测试与 Release 资产校验。 |
+| 发布链路未端到端验证 | 本地测试已覆盖 manifest 校验，但尚未使用真实 GitHub Actions 生成并公开包含 `latest.json` 的 Release。 | 使用非生产标签验证标签校验、双平台资产、草稿、签名、manifest 与手动公开发布。 |
 
 ## 7. 参考
 

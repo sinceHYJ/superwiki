@@ -9,7 +9,7 @@
 | 桌面端自动更新交互 | 已实现 | `src/AppUpdater.tsx`、`src/updateController.ts`、`src/updateSave.ts` |
 | Tauri 更新器、更新源与签名公钥 | 已配置 | `src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`src-tauri/capabilities/default.json` |
 | GitHub Actions 构建、草稿与手动发布流程定义 | 已配置 | `.github/workflows/build-update.yml`、`.github/workflows/publish-update.yml` |
-| GitHub Actions 实际打包、创建草稿及公开发布 | 当前不可执行 | 两个工作流均调用缺失的 `scripts/update-release.mjs` |
+| GitHub Actions 实际打包、创建草稿及公开发布 | 脚本已恢复，待端到端验收 | `scripts/update-release.mjs`、两个工作流和更新测试 |
 
 ## 自动更新：已实现功能点
 
@@ -38,7 +38,7 @@
 
 ## 当前限制与未完成项
 
-1. `scripts/update-release.mjs` 缺失。构建工作流会在 `check-tag` 步骤失败；草稿任务和手动发布任务也会因同一文件缺失失败。因此，当前不能把“自动创建草稿 Release”“生成并校验 `latest.json`”“公开发布并设为 Latest”描述为已实现且可运行的功能。
-2. `npm run test:updates` 同样因该脚本缺失而失败，更新控制器与发布清单测试未能在当前工作树完整执行。
+1. `scripts/update-release.mjs` 已从删除前受审版本恢复，提供标签校验、草稿 Release 创建、`latest.json` 生成与校验、公开发布功能；`npm run test:updates` 已通过 8 项测试。
+2. GitHub Actions 尚未在恢复后的工作树运行，因此 Windows/macOS 双平台构建、草稿资产、签名、`latest.json` 上传和公开发布仍待端到端验收。
 3. GitHub Actions 中 Apple 代码签名与公证的环境变量被注释，macOS 的 Apple 签名、公证及 Gatekeeper 验证尚未配置。
 4. 更新签名只能证明更新包由持有配套私钥的一方生成；它不替代 macOS 代码签名或公证。
