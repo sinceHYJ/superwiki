@@ -211,22 +211,22 @@ flowchart LR
 
 | 文件:方法 | 参数 | 逻辑 |
 | --- | --- | --- |
-| `src/AppUpdater.tsx:AppUpdater` | `{ currentVersion: string; prepareInstall: () => Promise<void>; finishInstall: () => void; onOpenChange: (open: boolean) => void }` | 在桌面运行时启动一次检查；渲染红点和弹窗；将下载、安装操作委托给状态机。 |
-| `src/AppUpdater.tsx:openDialog` | 无 | 打开原生 `<dialog>`，清空外链错误，并触发一次手动检查。 |
-| `src/AppUpdater.tsx:openLink` | `url: string` | 仅接受 `http:` / `https:` URL；通过 Opener 打开，失败则写入 `linkError`。 |
-| `src/updateController.ts:createUpdateController` | `check: () => Promise<PendingUpdate \| null>` | 创建模块级状态、订阅集合和单个 `Update` 句柄，返回更新操作接口。 |
-| `src/updateController.ts:start` | 无 | 用 `started` 布尔值保证一次应用生命周期内只发起一次启动检查。 |
-| `src/updateController.ts:check` | 无 | 忽略检查/下载/准备安装/安装中的重复调用；请求更新，拒绝预发布，替换旧句柄，更新为 `latest` 或 `available`。 |
-| `src/updateController.ts:download` | 无 | 仅在 `available` 状态下载；接收 `Started` 与 `Progress` 事件，累计字节数；成功转 `ready`，失败回退 `available`。 |
-| `src/updateController.ts:install` | `prepare: () => Promise<void>`，`restart: () => Promise<void>` | 仅在 `ready` 状态执行：先保存，再 `update.install()`，最后重启；任一步失败转回 `ready` 以支持重试。 |
-| `src/updateSave.ts:collectUpdateDocuments` | `tabs: DocumentFile[]`，`drafts: Record<string, string>`，`active: DocumentFile \| null`，`latest: string` | 将非活动页草稿与当前页即时编辑器内容转换为待写入文档；遇到无法定位的草稿直接失败，避免静默丢失。 |
-| `src/updateSave.ts:createSaveQueue` | `write: (document: UpdateDocument) => Promise<void>` | 返回串行写队列：普通写入挂到 `pending` 后；安装前写入先等待已在途任务，再逐项写入。 |
-| `src/updateSave.ts:saveBeforeUpdate` | `documents: UpdateDocument[]` | 伪代码：`await pending; for (document of documents) await write(document)`；任何一项失败立即中断，不进入安装。 |
-| `src/App.tsx:prepareUpdateInstall` | 无 | 禁止正在切换文件时安装；取消自动保存定时器；同步编辑器；收集草稿并调用 `saveBeforeUpdate`；失败时恢复草稿和错误状态。 |
-| `scripts/update-release.mjs:check-tag` | 工作流命令行子命令；`GITHUB_REF_NAME` 或 `UPDATE_TAG` | 仅接受稳定版 `vX.Y.Z`，并校验去除 `v` 后的标签版本与 `package.json.version` 一致。 |
-| `scripts/update-release.mjs:draft` | 工作流命令行子命令；`GITHUB_REF_NAME` 或 `UPDATE_TAG` | 收集 `update-artifacts`，要求唯一的 NSIS、Universal macOS 归档、DMG、MSI 及签名；生成并校验 `latest.json`，再创建草稿 Release 和上传资产。 |
-| `scripts/update-release.mjs:publish` | 工作流命令行子命令；环境变量 `UPDATE_TAG` | 读取草稿及资产，拒绝预发布或占位更新日志，下载 manifest 与签名并校验，写入正式更新日志和 `pub_date` 后公开 Release。 |
-| `scripts/update-release.mjs:stableVersion`、`validateManifest` | `(tag: string)`；`(manifest, tag, assetNames)` | `stableVersion` 仅接受稳定版标签；`validateManifest` 校验版本、三平台条目、GitHub 下载 URL、资产存在性和签名。两者由更新测试覆盖。 |
+| [src/AppUpdater.tsx:AppUpdater](/Users/administrator/cp/project/superwiki/src/AppUpdater.tsx:17) | `{ currentVersion: string; prepareInstall: () => Promise<void>; finishInstall: () => void; onOpenChange: (open: boolean) => void }` | 在桌面运行时启动一次检查；渲染红点和弹窗；将下载、安装操作委托给状态机。 |
+| [src/AppUpdater.tsx:openDialog](/Users/administrator/cp/project/superwiki/src/AppUpdater.tsx:42) | 无 | 打开原生 `<dialog>`，清空外链错误，并触发一次手动检查。 |
+| [src/AppUpdater.tsx:openLink](/Users/administrator/cp/project/superwiki/src/AppUpdater.tsx:49) | `url: string` | 仅接受 `http:` / `https:` URL；通过 Opener 打开，失败则写入 `linkError`。 |
+| [src/updateController.ts:createUpdateController](/Users/administrator/cp/project/superwiki/src/updateController.ts:20) | `check: () => Promise<PendingUpdate \| null>` | 创建模块级状态、订阅集合和单个 `Update` 句柄，返回更新操作接口。 |
+| [src/updateController.ts:start](/Users/administrator/cp/project/superwiki/src/updateController.ts:35) | 无 | 用 `started` 布尔值保证一次应用生命周期内只发起一次启动检查。 |
+| [src/updateController.ts:check](/Users/administrator/cp/project/superwiki/src/updateController.ts:40) | 无 | 忽略检查/下载/准备安装/安装中的重复调用；请求更新，拒绝预发布，替换旧句柄，更新为 `latest` 或 `available`。 |
+| [src/updateController.ts:download](/Users/administrator/cp/project/superwiki/src/updateController.ts:57) | 无 | 仅在 `available` 状态下载；接收 `Started` 与 `Progress` 事件，累计字节数；成功转 `ready`，失败回退 `available`。 |
+| [src/updateController.ts:install](/Users/administrator/cp/project/superwiki/src/updateController.ts:70) | `prepare: () => Promise<void>`，`restart: () => Promise<void>` | 仅在 `ready` 状态执行：先保存，再 `update.install()`，最后重启；任一步失败转回 `ready` 以支持重试。 |
+| [src/updateSave.ts:collectUpdateDocuments](/Users/administrator/cp/project/superwiki/src/updateSave.ts:4) | `tabs: DocumentFile[]`，`drafts: Record<string, string>`，`active: DocumentFile \| null`，`latest: string` | 将非活动页草稿与当前页即时编辑器内容转换为待写入文档；遇到无法定位的草稿直接失败，避免静默丢失。 |
+| [src/updateSave.ts:createSaveQueue](/Users/administrator/cp/project/superwiki/src/updateSave.ts:18) | `write: (document: UpdateDocument) => Promise<void>` | 返回串行写队列：普通写入挂到 `pending` 后；安装前写入先等待已在途任务，再逐项写入。 |
+| [src/updateSave.ts:saveBeforeUpdate](/Users/administrator/cp/project/superwiki/src/updateSave.ts:26) | `documents: UpdateDocument[]` | 伪代码：`await pending; for (document of documents) await write(document)`；任何一项失败立即中断，不进入安装。 |
+| [src/App.tsx:prepareUpdateInstall](/Users/administrator/cp/project/superwiki/src/App.tsx:374) | 无 | 禁止正在切换文件时安装；取消自动保存定时器；同步编辑器；收集草稿并调用 `saveBeforeUpdate`；失败时恢复草稿和错误状态。 |
+| [scripts/update-release.mjs:check-tag](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:95) | 工作流命令行子命令；`GITHUB_REF_NAME` 或 `UPDATE_TAG` | 仅接受稳定版 `vX.Y.Z`，并校验去除 `v` 后的标签版本与 `package.json.version` 一致。 |
+| [scripts/update-release.mjs:draft](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:40) | 工作流命令行子命令；`GITHUB_REF_NAME` 或 `UPDATE_TAG` | 收集 `update-artifacts`，要求唯一的 NSIS、Universal macOS 归档、DMG、MSI 及签名；生成并校验 `latest.json`，再创建草稿 Release 和上传资产。 |
+| [scripts/update-release.mjs:publish](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:68) | 工作流命令行子命令；环境变量 `UPDATE_TAG` | 读取草稿及资产，拒绝预发布或占位更新日志，下载 manifest 与签名并校验，写入正式更新日志和 `pub_date` 后公开 Release。 |
+| [scripts/update-release.mjs:stableVersion](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:10)、[scripts/update-release.mjs:validateManifest](/Users/administrator/cp/project/superwiki/scripts/update-release.mjs:15) | `(tag: string)`；`(manifest, tag, assetNames)` | `stableVersion` 仅接受稳定版标签；`validateManifest` 校验版本、三平台条目、GitHub 下载 URL、资产存在性和签名。两者由更新测试覆盖。 |
 
 ### 4.3 客户端调用图（PlantUML）
 
