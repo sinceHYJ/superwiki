@@ -203,9 +203,12 @@ export class SyncController {
         : snapshotFromEntries(listed);
       const baseline = await loadBaseline(settings.bindingId);
       const scopedBaseline = baseline ? filterSnapshot(baseline, settings.relativeScope) : null;
-      const plan = planSync(scopedBaseline, local, remote);
+      // manifest 是远端删除状态的唯一权威来源。manifest 缺失时退回首次同步语义：
+      // 本地多出的文件上传、内容不一致进冲突，禁止用本地 baseline 推断“远端已删除”而误删本地文件。
+      const base = manifest ? scopedBaseline : null;
+      const plan = planSync(base, local, remote);
 
-      if (!baseline && plan.conflicts.length && !choices) {
+      if (!base && plan.conflicts.length && !choices) {
         this.update({ phase: "conflicts", message: `需要处理 ${plan.conflicts.length} 个首次同步冲突`, conflicts: plan.conflicts });
         throw new InitialSyncConflictError(plan.conflicts);
       }
