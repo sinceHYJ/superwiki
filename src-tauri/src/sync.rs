@@ -2,6 +2,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    ffi::OsStr,
     fs::{self, File, OpenOptions},
     io::{BufReader, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
@@ -14,6 +15,13 @@ use uuid::Uuid;
 const CONFIG_VERSION: u8 = 1;
 const PROVIDER_OSS: &str = "oss";
 const SYNC_METADATA_DIRECTORY: &str = ".superwiki-sync";
+
+fn is_system_junk_file(name: &OsStr) -> bool {
+    matches!(
+        name.to_string_lossy().to_ascii_lowercase().as_str(),
+        ".ds_store" | "thumbs.db" | "desktop.ini"
+    )
+}
 
 #[derive(Default)]
 pub struct WorkspaceWatcher(Mutex<Option<RecommendedWatcher>>);
@@ -481,6 +489,12 @@ fn scan(
             skipped.push(relative);
             continue;
         }
+        // .DS_Store、Thumbs.db、desktop.ini 是操作系统自动生成的元数据，内容随时变化，
+        // 同步它们只会制造无意义的上传和跨设备垃圾文件。
+        if is_system_junk_file(&item.file_name()) {
+            skipped.push(relative);
+            continue;
+        }
         if metadata.file_type().is_symlink() {
             skipped.push(relative);
             continue;
@@ -808,6 +822,29 @@ mod tests {
         assert!(checked_relative("../secret").is_err());
         assert!(checked_relative("C:\\secret").is_err());
         assert!(checked_relative("docs/guide.md").is_ok());
+    }
+
+    #[test]
+    fn skips_system_junk_files_during_scan() {
+        let root = temporary_directory("junk");
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join(".DS_Store"), b"junk").unwrap();
+        fs::write(root.join("docs").join("Thumbs.db"), b"junk").unwrap();
+        fs::write(root.join("desktop.ini"), b"junk").unwrap();
+        fs::write(root.join("note.md"), b"hello").unwrap();
+        let mut entries = Vec::new();
+        let mut skipped = Vec::new();
+        scan(&root, &root, &mut entries, &mut skipped).unwrap();
+        let mut paths: Vec<&str> = entries.iter().map(|entry| entry.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["docs", "note.md"]);
+        let mut skipped_paths: Vec<&str> = skipped.iter().map(String::as_str).collect();
+        skipped_paths.sort();
+        assert_eq!(
+            skipped_paths,
+            vec![".DS_Store", "desktop.ini", "docs/Thumbs.db"]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

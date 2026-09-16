@@ -3,6 +3,8 @@ import type { WorkspaceSyncCredentials } from "../config";
 import type { ChunkReader, ChunkWriter, RemoteEntry, RemoteRevision, SyncLease, SyncManifest, SyncProvider } from "../types";
 
 const INTERNAL_DIRECTORY = ".superwiki-sync";
+// 与 src-tauri/src/sync.rs 的 is_system_junk_file 保持一致。
+const SYSTEM_JUNK_FILES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
 const CHUNK_SIZE = 8 * 1024 * 1024;
 const LEASE_DURATION = 2 * 60 * 1000;
 
@@ -63,8 +65,10 @@ export class OssSyncProvider implements SyncProvider {
         const relative = this.root ? object.name.slice(this.root.length).replace(/^\//, "") : object.name;
         if (!relative || relative.startsWith(`${INTERNAL_DIRECTORY}/`)) continue;
         const directory = relative.endsWith("/");
+        const path = directory ? relative.slice(0, -1) : relative;
+        if (SYSTEM_JUNK_FILES.has(path.split("/").pop()?.toLowerCase() ?? "")) continue;
         entries.push({
-          path: directory ? relative.slice(0, -1) : relative,
+          path,
           kind: directory ? "directory" : "file",
           size: directory ? undefined : object.size,
           modifiedAt: Date.parse(object.lastModified),

@@ -184,7 +184,7 @@ export class SyncController {
       provider = new OssSyncProvider(credentials);
       lease = await provider.acquireLease(credentials.workspaceId);
       const localResult = await scanLocalWorkspace(root);
-      this.update({ activities: localResult.skipped.slice(-MAX_ACTIVITIES).map((path) => ({ action: "skip", path, message: "已跳过符号链接或特殊文件" })) });
+      this.update({ activities: localResult.skipped.slice(-MAX_ACTIVITIES).map((path) => ({ action: "skip", path, message: "已跳过符号链接、特殊文件或系统文件" })) });
       const local = globalSnapshot(localResult.snapshot, settings.relativeScope);
       let manifest = await provider.loadManifest();
       const listed = await provider.list(settings.relativeScope);
