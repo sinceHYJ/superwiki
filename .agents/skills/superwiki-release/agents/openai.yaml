@@ -1,7 +1,7 @@
 interface:
   display_name: "SuperWiki 客户端发布"
-  short_description: "自动对比版本提交、同步版本号、提交代码并打包桌面客户端"
-  default_prompt: "使用 $superwiki-release 对比上个版本后的提交，升级版本并打包 SuperWiki 客户端。"
+  short_description: "同步版本、提交并推送标签，由 GitHub Actions 构建客户端"
+  default_prompt: "使用 $superwiki-release 对比上个版本后的提交，升级版本、提交并推送发布标签，由 GitHub Actions 构建 SuperWiki 客户端。"
 
 policy:
   allow_implicit_invocation: true
