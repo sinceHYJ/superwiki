@@ -1,21 +1,28 @@
 ---
 name: superwiki-release
-description: 发布和打包 SuperWiki 桌面客户端。用于用户要求打包客户端、发布新版本、升级版本号、比较上个版本后的 Git 提交、生成发布说明，或执行“版本提交后再构建 DMG”的完整发布流程。仅适用于 SuperWiki 仓库。
+description: 通过 GitHub Actions 发布 SuperWiki 桌面客户端。用于用户要求对比上个版本后的 Git 提交、升级版本号、提交版本改动、创建并推送发布标签。推送 vX.Y.Z 标签后由 GitHub Actions 构建并创建草稿发布。仅适用于 SuperWiki 仓库。
 ---
 
 # SuperWiki 客户端发布
 
-按固定顺序完成：检查仓库 → 对比版本差异 → 确认新版本 → 同步版本号 → 验证并提交 → 打包 → 创建版本标签。
+按固定顺序完成：检查仓库 → 对比版本差异 → 确认新版本 → 同步版本号 → 验证 → 使用 `git-commit` 提交 → 创建标签 → 推送分支和标签。
+
+## 发布模型
+
+- 本地不打包，不运行 `build.sh`。项目根目录也不再要求存在 `build.sh`。
+- 推送稳定标签 `vX.Y.Z` 会触发 `.github/workflows/build-update.yml`：GitHub Actions 在 Windows 和 macOS 上构建产物，并创建 GitHub 草稿发布。
+- 草稿发布创建后，用户需要在 GitHub 填写更新日志，再手动运行 `Publish update` 工作流完成正式发布。
+- GitHub Actions 当前仅支持稳定版标签 `vX.Y.Z`。不要使用预发布版或带构建元数据的 SemVer 标签；`scripts/update-release.mjs check-tag` 会拒绝它们。
 
 ## 约束
 
-- 仅在仓库根目录包含 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 和 `build.sh` 时执行。
+- 仅在仓库根目录包含 `package.json`、`src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 时执行。
 - 不自动提交发布前已经存在的未提交改动。若 `git status --short` 非空，列出文件并暂停，让用户先提交或暂存；禁止自行 `git add -A`、`git stash`、丢弃或混入这些改动。
-- 不执行 `git push`，除非用户明确要求。
-- 不修改业务代码，不顺带重构打包脚本。
-- 新版本必须符合 SemVer，例如 `0.2.0`、`1.0.0-beta.1`。
-- 四处版本必须一致：`package.json`、`package-lock.json` 根包、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`；同时更新 `src-tauri/Cargo.lock` 中 `superwiki` 包版本。
-- 只有打包成功后才创建本地版本标签；打包失败时保留版本提交以便排查，但不创建标签、不回滚、不声称发布成功。
+- 不修改业务代码，不顺带重构构建或发布脚本。
+- 新版本必须是递增的稳定版 `X.Y.Z`，例如 `0.2.0` 或 `1.0.0`。
+- 五处版本必须一致：`package.json`、`package-lock.json` 根包、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 中的 `superwiki` 包。
+- 提交必须使用 `git-commit` 技能，并且只能包含本次会话修改的版本文件。
+- 标签和分支推送是本技能发布流程的一部分；仅推送当前分支和指定标签，禁止 force push。
 
 ## 工作流
 
@@ -33,14 +40,13 @@ node .agents/skills/superwiki-release/scripts/sync-version.mjs --check
 
 ### 2. 确定上一个版本基准
 
-优先选择当前 `HEAD` 可达的最新 SemVer 标签：
+优先选择当前 `HEAD` 可达的最新稳定标签：
 
 ```bash
 git tag --merged HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname
-git tag --merged HEAD --list '[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname
 ```
 
-取第一个与 SemVer 格式完整匹配的标签。不要把非版本标签当作发布基准。
+取第一个完整匹配 `vX.Y.Z` 的标签。不要把非版本标签或预发布标签当作发布基准。
 
 如果没有版本标签，视为首次规范发布，使用最早一次修改版本文件的提交作为基准：
 
@@ -68,7 +74,7 @@ git diff --name-status <base>..HEAD
 - 主要修改文件；
 - 按 `feat`、`fix`、`perf`、`refactor`、`docs/test/chore/build/ci` 分类的简短发布摘要。
 
-若范围内没有提交，不升级版本、不提交、不打包。
+若范围内没有提交，不升级版本、不提交、不创建或推送标签。
 
 ### 4. 推荐并确认新版本
 
@@ -93,9 +99,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
 ```
 
-任一验证失败都停止，不提交、不打包。报告失败命令、直接错误和建议修复方法；保留版本文件修改供用户检查。
+任一验证失败都停止，不提交、不创建或推送标签。报告失败命令、直接错误和建议修复方法；保留版本文件修改供用户检查。
 
-### 6. 仅提交版本文件
+### 6. 使用 `git-commit` 提交版本文件
 
 先确认差异只包含预期版本文件：
 
@@ -104,44 +110,49 @@ git diff -- package.json package-lock.json src-tauri/tauri.conf.json src-tauri/C
 git status --short
 ```
 
-只暂存以下文件：
+调用 `git-commit` 技能，按其会话范围和暂存检查规则，仅提交以下版本文件：
 
-```bash
-git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
-git commit -m "chore: 发布 v<new-version>"
+```text
+package.json
+package-lock.json
+src-tauri/tauri.conf.json
+src-tauri/Cargo.toml
+src-tauri/Cargo.lock
+```
+
+提交信息使用：
+
+```text
+chore: 发布 v<new-version>
 ```
 
 提交后记录提交哈希。若出现其他文件改动，停止并说明，不扩大暂存范围。
 
-### 7. 打包客户端
+### 7. 创建并推送发布标签
 
-使用项目现有交互式脚本，不复制其构建逻辑：
-
-```bash
-./build.sh
-```
-
-- 版本输入直接接受默认值，默认值应等于刚提交的新版本。
-- 架构默认选择 Universal；用户明确指定 Apple Silicon 或 Intel 时按用户选择。
-- 签名默认选择正常构建；仅当用户明确要求本地测试或跳过签名时选择 `--no-sign` 对应选项。
-- 通过 PTY 运行并按提示输入，不改写 `build.sh`。
-- 完成后确认输出的 `.dmg` 文件真实存在，并报告绝对路径、文件大小和 SHA-256：
-
-```bash
-ls -lh <dmg-path>
-shasum -a 256 <dmg-path>
-```
-
-### 8. 打包成功后创建本地标签
-
-确认标签尚不存在后创建 annotated tag：
+提交完成后，先确认本地和远程标签均不存在：
 
 ```bash
 git rev-parse -q --verify "refs/tags/v<new-version>"
+git ls-remote --exit-code --tags origin "refs/tags/v<new-version>"
+```
+
+仅当两个检查都确认标签不存在时，创建 annotated tag：
+
+```bash
 git tag -a "v<new-version>" -m "SuperWiki v<new-version>"
 ```
 
-若标签已存在，停止并报告冲突，不覆盖标签。除非用户明确要求，否则不要 push commit 或 tag。
+推送版本提交所在分支，再推送指定标签：
+
+```bash
+git push origin <current-branch>
+git push origin "v<new-version>"
+```
+
+标签推送成功即表示 GitHub Actions 构建已被触发。不要以本地构建结果冒充已完成的云端构建；检查 Actions 运行状态并报告链接或状态。
+
+若推送失败，保留本地提交和标签，报告失败命令、远程错误和重试步骤。禁止 force push 或覆盖已有远程标签。
 
 ## 最终输出
 
@@ -151,9 +162,9 @@ git tag -a "v<new-version>" -m "SuperWiki v<new-version>"
 2. 主要变更摘要；
 3. 旧版本 → 新版本；
 4. 版本提交哈希；
-5. 本地标签；
-6. DMG 绝对路径、大小和 SHA-256；
+5. 已推送的标签；
+6. GitHub Actions 构建状态或链接；
 7. 验证命令结果；
-8. 是否需要用户继续执行 `git push` 和 `git push origin v<new-version>`。
+8. 下一步：构建完成后在 GitHub 草稿发布中填写更新日志，并运行 `Publish update` 工作流。
 
 如果中途失败，结论必须写明失败阶段、根因、当前仓库状态和恢复/重试步骤。
