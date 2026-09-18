@@ -1,5 +1,3 @@
-export const SHORTCUT_STORAGE_KEY = "superwiki.shortcuts";
-
 export type EditorShortcutId = "bold" | "italic" | "inlineCode" | "codeBlock" | "link" | "image";
 export type AppShortcutId = "save" | "favorite" | "toggleSidebar" | "toggleOutline" | "toggleView" | "toggleFullscreen";
 export type ShortcutId = EditorShortcutId | AppShortcutId;
@@ -128,31 +126,22 @@ export function setShortcutBinding(bindings: ShortcutBindings, id: ShortcutId, c
   return error ? { bindings, error } : { bindings: { ...bindings, [id]: chord }, error: null };
 }
 
-export function readShortcutBindings(): ShortcutBindings {
+export function readShortcutBindings(overrides: Partial<Record<ShortcutId, string>> = {}): ShortcutBindings {
   const bindings = { ...DEFAULT_SHORTCUT_BINDINGS };
-  try {
-    const stored = localStorage.getItem(SHORTCUT_STORAGE_KEY);
-    if (!stored) return bindings;
-    const parsed = JSON.parse(stored) as Partial<Record<ShortcutId, unknown>>;
-    if (!parsed || typeof parsed !== "object") return bindings;
-
-    for (const definition of SHORTCUT_DEFINITIONS) {
-      const value = parsed[definition.id];
-      if (typeof value !== "string") continue;
-      const result = setShortcutBinding(bindings, definition.id, value);
-      if (!result.error) Object.assign(bindings, result.bindings);
-    }
-  } catch {
-    // 配置损坏时使用默认值，不影响应用启动。
+  for (const definition of SHORTCUT_DEFINITIONS) {
+    const value = overrides[definition.id];
+    if (typeof value !== "string") continue;
+    const result = setShortcutBinding(bindings, definition.id, value);
+    if (result.error) throw new Error(`快捷键“${definition.label}”配置无效：${result.error}`);
+    Object.assign(bindings, result.bindings);
   }
   return bindings;
 }
 
-export function saveShortcutBindings(bindings: ShortcutBindings) {
-  const overrides = Object.fromEntries(
+export function shortcutOverrides(bindings: ShortcutBindings) {
+  return Object.fromEntries(
     SHORTCUT_DEFINITIONS
       .filter((definition) => bindings[definition.id] !== definition.defaultChord)
       .map((definition) => [definition.id, bindings[definition.id]]),
-  );
-  localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(overrides));
+  ) as Partial<Record<ShortcutId, string>>;
 }

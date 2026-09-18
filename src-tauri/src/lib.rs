@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
@@ -7,9 +8,11 @@ use std::{
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
+mod settings;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FileTreeNode {
+pub(crate) struct FileTreeNode {
     name: String,
     path: String,
     is_dir: bool,
@@ -20,7 +23,7 @@ struct FileTreeNode {
 }
 
 #[derive(Serialize)]
-struct WorkspaceTree {
+pub(crate) struct WorkspaceTree {
     root: String,
     name: String,
     children: Vec<FileTreeNode>,
@@ -46,39 +49,12 @@ struct OssSyncConfig {
     enabled: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OssSyncSettingsInput {
-    region: String,
-    endpoint: String,
-    bucket: String,
-    prefix: String,
-    access_key_id: String,
-    access_key_secret: Option<String>,
-    enabled: bool,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OssSyncSettings {
-    region: String,
-    endpoint: String,
-    bucket: String,
-    prefix: String,
-    access_key_id: String,
-    has_access_key_secret: bool,
-    enabled: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OssSyncCredentials {
-    region: String,
-    endpoint: String,
-    bucket: String,
-    prefix: String,
-    access_key_id: String,
-    access_key_secret: String,
+struct OpenWorkspaceResult {
+    workspace: settings::WorkspaceRecord,
+    tree: WorkspaceTree,
+    preferences: settings::WorkspacePreferences,
 }
 
 #[derive(Deserialize)]
@@ -236,20 +212,6 @@ fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn oss_sync_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let config_dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| format!("无法确定应用配置目录：{error}"))?;
-    fs::create_dir_all(&config_dir).map_err(|error| format!("无法创建应用配置目录：{error}"))?;
-    Ok(config_dir.join("oss-sync.json"))
-}
-
-fn oss_sync_secret_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new("com.superwiki.app", "oss-access-key-secret")
-        .map_err(|error| format!("无法访问系统凭据库：{error}"))
-}
-
 fn normalize_oss_prefix(prefix: &str) -> Result<String, String> {
     let prefix = prefix.trim().trim_matches('/').replace('\\', "/");
     if prefix.split('/').any(|part| part == "..") {
@@ -313,6 +275,10 @@ fn validate_entry_name(name: &str) -> Result<(), String> {
 #[tauri::command]
 fn list_workspace(root: String) -> Result<WorkspaceTree, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    build_workspace_tree(&root)
+}
+
+fn build_workspace_tree(root: &Path) -> Result<WorkspaceTree, String> {
     if !root.is_dir() {
         return Err("选择的路径不是文件夹".into());
     }
@@ -322,7 +288,7 @@ fn list_workspace(root: String) -> Result<WorkspaceTree, String> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| root.to_string_lossy().into_owned()),
-        children: scan_directory(&root)?,
+        children: scan_directory(root)?,
         root: root.to_string_lossy().into_owned(),
     })
 }
@@ -466,35 +432,123 @@ fn read_workspace_sync_file(root: String, path: String) -> Result<tauri::ipc::Re
 }
 
 #[tauri::command]
-fn load_oss_sync_settings(app: tauri::AppHandle) -> Result<Option<OssSyncSettings>, String> {
-    let config_path = oss_sync_config_path(&app)?;
-    if !config_path.exists() {
-        return Ok(None);
-    }
-
-    let mut config: OssSyncConfig = serde_json::from_slice(
-        &fs::read(&config_path).map_err(|error| format!("无法读取 OSS 配置：{error}"))?,
-    )
-    .map_err(|error| format!("OSS 配置无效：{error}"))?;
-    config.endpoint = normalize_oss_endpoint(&config.endpoint)?;
-    validate_oss_sync_config(&config)?;
-    let has_access_key_secret = oss_sync_secret_entry()?.get_password().is_ok();
-
-    Ok(Some(OssSyncSettings {
-        region: config.region,
-        endpoint: config.endpoint,
-        bucket: config.bucket,
-        prefix: config.prefix,
-        access_key_id: config.access_key_id,
-        has_access_key_secret,
-        enabled: config.enabled,
-    }))
+async fn initialize_settings(app: tauri::AppHandle) -> Result<settings::BootstrapSettings, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::initialize(&app))
+        .await
+        .map_err(|error| format!("配置初始化任务失败：{error}"))?
 }
 
 #[tauri::command]
-fn save_oss_sync_settings(
+async fn update_app_preference(
     app: tauri::AppHandle,
-    settings: OssSyncSettingsInput,
+    change: settings::PreferenceChange,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || settings::update_preference(&app, change))
+        .await
+        .map_err(|error| format!("配置保存任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn save_shortcut_overrides(
+    app: tauri::AppHandle,
+    overrides: HashMap<String, String>,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || settings::save_shortcuts(&app, overrides))
+        .await
+        .map_err(|error| format!("快捷键保存任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn open_workspace(
+    app: tauri::AppHandle,
+    root: String,
+) -> Result<OpenWorkspaceResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+        let tree = build_workspace_tree(&root)?;
+        let (workspace, preferences) = settings::open_workspace(&app, &root)?;
+        Ok(OpenWorkspaceResult {
+            workspace,
+            tree,
+            preferences,
+        })
+    })
+    .await
+    .map_err(|error| format!("工作区打开任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn close_workspace(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || settings::close_workspace(&app))
+        .await
+        .map_err(|error| format!("工作区配置保存任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn set_document_favorite(
+    app: tauri::AppHandle,
+    workspace_id: i64,
+    path: String,
+    favorite: bool,
+) -> Result<settings::WorkspacePreferences, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        settings::set_favorite(&app, workspace_id, &path, favorite)
+    })
+    .await
+    .map_err(|error| format!("收藏保存任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn record_recent_edit(
+    app: tauri::AppHandle,
+    workspace_id: i64,
+    path: String,
+) -> Result<settings::WorkspacePreferences, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::record_recent(&app, workspace_id, &path))
+        .await
+        .map_err(|error| format!("最近编辑保存任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn remap_workspace_documents(
+    app: tauri::AppHandle,
+    workspace_id: i64,
+    old_path: String,
+    new_path: String,
+) -> Result<settings::WorkspacePreferences, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        settings::remap_documents(&app, workspace_id, &old_path, &new_path)
+    })
+    .await
+    .map_err(|error| format!("文档配置更新任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn remove_workspace_documents(
+    app: tauri::AppHandle,
+    workspace_id: i64,
+    path: String,
+) -> Result<settings::WorkspacePreferences, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        settings::remove_documents(&app, workspace_id, &path)
+    })
+    .await
+    .map_err(|error| format!("文档配置清理任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn load_oss_sync_settings(
+    app: tauri::AppHandle,
+) -> Result<Option<settings::OssSyncSettings>, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::load_oss_settings(&app))
+        .await
+        .map_err(|error| format!("OSS 配置读取任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn save_oss_sync_settings(
+    app: tauri::AppHandle,
+    settings: settings::OssSyncSettingsInput,
 ) -> Result<(), String> {
     let config = OssSyncConfig {
         region: settings.region.trim().to_string(),
@@ -505,46 +559,29 @@ fn save_oss_sync_settings(
         enabled: settings.enabled,
     };
     validate_oss_sync_config(&config)?;
-
-    let secret_entry = oss_sync_secret_entry()?;
-    if let Some(secret) = settings
-        .access_key_secret
-        .filter(|secret| !secret.trim().is_empty())
-    {
-        secret_entry
-            .set_password(&secret)
-            .map_err(|error| format!("无法保存 OSS 密钥到系统凭据库：{error}"))?;
-    } else if secret_entry.get_password().is_err() {
-        return Err("请填写 AccessKey Secret".into());
-    }
-
-    let config_json = serde_json::to_vec_pretty(&config)
-        .map_err(|error| format!("无法序列化 OSS 配置：{error}"))?;
-    fs::write(oss_sync_config_path(&app)?, config_json)
-        .map_err(|error| format!("无法保存 OSS 配置：{error}"))
-}
-
-#[tauri::command]
-fn load_oss_sync_credentials(app: tauri::AppHandle) -> Result<OssSyncCredentials, String> {
-    let config_path = oss_sync_config_path(&app)?;
-    let mut config: OssSyncConfig = serde_json::from_slice(
-        &fs::read(config_path).map_err(|error| format!("请先保存 OSS 配置：{error}"))?,
-    )
-    .map_err(|error| format!("OSS 配置无效：{error}"))?;
-    config.endpoint = normalize_oss_endpoint(&config.endpoint)?;
-    validate_oss_sync_config(&config)?;
-    let access_key_secret = oss_sync_secret_entry()?
-        .get_password()
-        .map_err(|error| format!("无法读取 OSS 密钥：{error}"))?;
-
-    Ok(OssSyncCredentials {
+    let normalized = settings::OssSyncSettingsInput {
         region: config.region,
         endpoint: config.endpoint,
         bucket: config.bucket,
         prefix: config.prefix,
         access_key_id: config.access_key_id,
-        access_key_secret,
+        access_key_secret: settings.access_key_secret,
+        enabled: config.enabled,
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::settings::save_oss_settings(&app, normalized)
     })
+    .await
+    .map_err(|error| format!("OSS 配置保存任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn load_oss_sync_credentials(
+    app: tauri::AppHandle,
+) -> Result<settings::OssSyncCredentials, String> {
+    tauri::async_runtime::spawn_blocking(move || settings::load_oss_credentials(&app))
+        .await
+        .map_err(|error| format!("OSS 密钥读取任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -839,6 +876,15 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
+            initialize_settings,
+            update_app_preference,
+            save_shortcut_overrides,
+            open_workspace,
+            close_workspace,
+            set_document_favorite,
+            record_recent_edit,
+            remap_workspace_documents,
+            remove_workspace_documents,
             list_workspace,
             rename_workspace_directory,
             rename_workspace_file,

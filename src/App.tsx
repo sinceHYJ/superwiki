@@ -48,7 +48,7 @@ import {
   chordFromKeyboardEvent,
   displayShortcut,
   readShortcutBindings,
-  saveShortcutBindings,
+  shortcutOverrides,
   setShortcutBinding,
   shortcutTitle,
   type EditorShortcutId,
@@ -68,7 +68,19 @@ import {
 import "./App.css";
 import AppUpdater from "./AppUpdater";
 import { collectUpdateDocuments, createSaveQueue } from "./updateSave";
-import { CONTENT_WIDTH_STORAGE_KEY, parseContentWidth, type ContentWidth } from "./contentWidth";
+import type { ContentWidth } from "./contentWidth";
+import {
+  closeWorkspaceSettings,
+  hasPendingSettingsWrite,
+  openWorkspace,
+  recordRecentEdit as saveRecentEdit,
+  remapWorkspaceDocuments,
+  removeWorkspaceDocuments,
+  saveShortcutOverrides,
+  setDocumentFavorite,
+  updateAppPreference,
+  type BootstrapSettings,
+} from "./settingsStore";
 
 type FileTreeNode = {
   name: string;
@@ -140,8 +152,6 @@ type RecentEditedDocument = {
   editedAt: number;
 };
 
-type RecentEditedStorage = Record<string, RecentEditedDocument[]>;
-
 type FavoriteDocument = {
   root: string;
   path: string;
@@ -150,18 +160,8 @@ type FavoriteDocument = {
   favoritedAt: number;
 };
 
-type FavoriteStorage = Record<string, FavoriteDocument[]>;
 type DocumentDrafts = Record<string, string>;
 
-const WORKSPACE_STORAGE_KEY = "superwiki.workspaceRoot";
-const RECENT_EDITED_STORAGE_KEY = "superwiki.recentEditedDocuments";
-const FAVORITE_STORAGE_KEY = "superwiki.favoriteDocuments";
-const MAX_RECENT_EDITED_DOCUMENTS = 20;
-const THEME_COLOR_STORAGE_KEY = "superwiki.themeColor";
-const THEME_COLOR_REDESIGN_MIGRATION_KEY = "superwiki.themeColorRedesignV1";
-const OPEN_TAB_LIMIT_STORAGE_KEY = "superwiki.openTabLimit";
-const AUTO_SAVE_STORAGE_KEY = "superwiki.autoSave";
-const DEFAULT_OPEN_TAB_LIMIT = 8;
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "yellow", name: "明亮黄", color: "#d9ed72" },
   { id: "sky", name: "天蓝色", color: "oklch(0.6331 0.0643 238.60)" },
@@ -177,19 +177,6 @@ const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
   accessKeyId: "",
   accessKeySecret: "",
 };
-
-function isThemeColor(value: string | null): value is ThemeColor {
-  return THEME_COLORS.some((theme) => theme.id === value);
-}
-
-function readOpenTabLimit() {
-  const storedLimit = Number.parseInt(localStorage.getItem(OPEN_TAB_LIMIT_STORAGE_KEY) ?? "", 10);
-  return Number.isInteger(storedLimit) && storedLimit > 0 ? storedLimit : DEFAULT_OPEN_TAB_LIMIT;
-}
-
-function readAutoSave() {
-  return localStorage.getItem(AUTO_SAVE_STORAGE_KEY) !== "false";
-}
 
 function documentDraftKey(file: Pick<ActiveFile, "root" | "path">) {
   return `${file.root}:${file.path}`;
@@ -207,12 +194,13 @@ const OPEN_IN_FILE_MANAGER_LABEL = IS_MACOS
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 const OfficePreview = lazy(() => import("./OfficePreview"));
 
-function App() {
+function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const [updateOpen, setUpdateOpen] = useState(false);
   const installingUpdateRef = useRef(false);
   const openingFilesRef = useRef(0);
   const [saveQueue] = useState(() => createSaveQueue((document) => invoke<void>("save_workspace_file", document)));
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
+  const [workspaceId, setWorkspaceId] = useState<number | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
   const [openTabs, setOpenTabs] = useState<ActiveFile[]>([]);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("document");
@@ -234,31 +222,28 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"basic" | "appearance" | "shortcuts" | "sync" | "about">("basic");
-  const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(readShortcutBindings);
+  const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(() => readShortcutBindings(initialSettings.shortcutOverrides));
   const [shortcutRecording, setShortcutRecording] = useState<ShortcutId | null>(null);
   const [shortcutError, setShortcutError] = useState("");
-  const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
-  const [autoSave, setAutoSave] = useState(readAutoSave);
-  const [contentWidth, setContentWidth] = useState<ContentWidth>(() => parseContentWidth(localStorage.getItem(CONTENT_WIDTH_STORAGE_KEY)));
-  const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
-  const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
+  const [shortcutSaving, setShortcutSaving] = useState(false);
+  const [preferenceSaving, setPreferenceSaving] = useState(false);
+  const [favoriteSaving, setFavoriteSaving] = useState(false);
+  const [openTabLimit, setOpenTabLimit] = useState(initialSettings.preferences.openTabLimit);
+  const [autoSave, setAutoSave] = useState(initialSettings.preferences.autoSave);
+  const [contentWidth, setContentWidth] = useState<ContentWidth>(initialSettings.preferences.contentWidth);
+  const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(initialSettings.ossSync);
+  const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(() => initialSettings.ossSync ? {
+    region: initialSettings.ossSync.region,
+    endpoint: initialSettings.ossSync.endpoint,
+    bucket: initialSettings.ossSync.bucket,
+    prefix: initialSettings.ossSync.prefix,
+    accessKeyId: initialSettings.ossSync.accessKeyId,
+    accessKeySecret: "",
+  } : EMPTY_OSS_SYNC_FORM);
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [syncMessage, setSyncMessage] = useState("");
   const [appVersion, setAppVersion] = useState("");
-  const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
-    const storedTheme = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
-    const redesignMigrated = localStorage.getItem(THEME_COLOR_REDESIGN_MIGRATION_KEY) === "1";
-
-    if (!redesignMigrated) {
-      localStorage.setItem(THEME_COLOR_REDESIGN_MIGRATION_KEY, "1");
-      if (!storedTheme || storedTheme === "yellow") {
-        localStorage.setItem(THEME_COLOR_STORAGE_KEY, "sky");
-        return "sky";
-      }
-    }
-
-    return isThemeColor(storedTheme) ? storedTheme : "sky";
-  });
+  const [themeColor, setThemeColor] = useState<ThemeColor>(initialSettings.preferences.themeColor);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
@@ -295,24 +280,16 @@ function App() {
     return latestMarkdown;
   }, []);
 
-  const recordRecentEdit = useCallback((file: ActiveFile) => {
-    if (file.kind !== "markdown") return;
-
-    const document: RecentEditedDocument = {
-      root: file.root,
-      path: file.path,
-      name: file.name,
-      relativePath: workspaceRelativePath(file.root, file.path, file.name),
-      editedAt: Date.now(),
-    };
-    const nextDocuments = [
-      document,
-      ...readRecentEditedDocuments(file.root).filter((item) => item.path !== file.path),
-    ].slice(0, MAX_RECENT_EDITED_DOCUMENTS);
-
-    writeRecentEditedDocuments(file.root, nextDocuments);
-    setRecentEditedDocuments(nextDocuments);
-  }, []);
+  const recordRecentEdit = useCallback(async (file: ActiveFile) => {
+    if (file.kind !== "markdown" || workspaceId === null) return;
+    try {
+      const preferences = await saveRecentEdit(workspaceId, file.path);
+      setRecentEditedDocuments(preferences.recent);
+      setFavoriteDocuments(preferences.favorites);
+    } catch (reason) {
+      setError(`最近编辑记录保存失败，请再次编辑后重试：${String(reason)}`);
+    }
+  }, [workspaceId]);
 
   const queueWorkspaceFileSync = useCallback((root: string, path: string) => {
     if (!ossSyncSettings?.enabled || !ossSyncSettings.hasAccessKeySecret) return;
@@ -367,12 +344,13 @@ function App() {
       delete nextDrafts[documentDraftKey(file)];
       return nextDrafts;
     });
-    recordRecentEdit(file);
+    await recordRecentEdit(file);
     queueWorkspaceFileSync(file.root, file.path);
   }, [autoSave, queueWorkspaceFileSync, recordRecentEdit, saveQueue, syncEditorContent]);
 
   const prepareUpdateInstall = async () => {
     if (openingFilesRef.current) throw new Error("文档正在切换，请稍后重试安装。");
+    if (hasPendingSettingsWrite()) throw new Error("配置正在保存，请稍后重试安装。");
     installingUpdateRef.current = true;
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
@@ -470,24 +448,20 @@ function App() {
     }
   }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
-  const loadWorkspace = useCallback(async (root: string, remember = true) => {
+  const loadWorkspace = useCallback(async (root: string) => {
     setWorkspaceLoading(true);
     try {
       setError("");
-      const tree = await invoke<WorkspaceTree>("list_workspace", { root });
-      const recentDocuments = filterExistingRecentDocuments(tree, readRecentEditedDocuments(tree.root));
-      const favorites = filterExistingFavoriteDocuments(tree, readFavoriteDocuments(tree.root));
-      setWorkspace(tree);
-      setRecentEditedDocuments(recentDocuments);
-      setFavoriteDocuments(favorites);
-      writeRecentEditedDocuments(tree.root, recentDocuments);
-      writeFavoriteDocuments(tree.root, favorites);
-      if (remember) localStorage.setItem(WORKSPACE_STORAGE_KEY, tree.root);
+      const result = await openWorkspace(root);
+      setWorkspace(result.tree);
+      setWorkspaceId(result.workspace.id);
+      setRecentEditedDocuments(result.preferences.recent);
+      setFavoriteDocuments(result.preferences.favorites);
     } catch (reason) {
       setWorkspace(null);
+      setWorkspaceId(null);
       setRecentEditedDocuments([]);
       setFavoriteDocuments([]);
-      localStorage.removeItem(WORKSPACE_STORAGE_KEY);
       setError(`无法打开文件夹：${String(reason)}`);
     } finally {
       setWorkspaceLoading(false);
@@ -495,6 +469,10 @@ function App() {
   }, []);
 
   const selectWorkspace = async () => {
+    if (hasPendingSettingsWrite()) {
+      setError("配置正在保存，请稍候再切换工作区。");
+      return;
+    }
     const selected = await open({ directory: true, multiple: false, title: "打开笔记文件夹" });
     if (!selected) return;
 
@@ -530,23 +508,6 @@ function App() {
 
   useEffect(() => () => {
     if (pathCopiedNoticeTimerRef.current !== null) window.clearTimeout(pathCopiedNoticeTimerRef.current);
-  }, []);
-
-  useEffect(() => {
-    void loadOssSyncSettings()
-      .then((settings) => {
-        if (!settings) return;
-        setOssSyncSettings(settings);
-        setOssSyncForm({
-          region: settings.region,
-          endpoint: settings.endpoint,
-          bucket: settings.bucket,
-          prefix: settings.prefix,
-          accessKeyId: settings.accessKeyId,
-          accessKeySecret: "",
-        });
-      })
-      .catch((reason) => setError(`无法读取 OSS 配置：${String(reason)}`));
   }, []);
 
   useEffect(() => {
@@ -608,9 +569,20 @@ function App() {
   }, [settingsOpen]);
 
   useEffect(() => {
-    const storedRoot = localStorage.getItem(WORKSPACE_STORAGE_KEY);
-    if (storedRoot) void loadWorkspace(storedRoot, false);
-  }, [loadWorkspace]);
+    const lastWorkspace = initialSettings.workspaces.find(({ id }) => id === initialSettings.preferences.lastWorkspaceId);
+    if (lastWorkspace) void loadWorkspace(lastWorkspace.path);
+  }, [initialSettings.preferences.lastWorkspaceId, initialSettings.workspaces, loadWorkspace]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow().onCloseRequested((event) => {
+      if (hasPendingSettingsWrite()) {
+        event.preventDefault();
+        setError("配置正在保存，请稍候再关闭应用。");
+      }
+    }).then((dispose) => { unlisten = dispose; });
+    return () => unlisten?.();
+  }, []);
 
   useEffect(() => {
     if (installingUpdateRef.current || !autoSave || !activeFile || activeFile.kind !== "markdown" || content === loadedContent.current) return;
@@ -630,7 +602,7 @@ function App() {
           delete nextDrafts[documentDraftKey(activeFile)];
           return nextDrafts;
         });
-        recordRecentEdit(activeFile);
+        await recordRecentEdit(activeFile);
         queueWorkspaceFileSync(activeFile.root, activeFile.path);
         saveTimerRef.current = null;
         setSaveState("saved");
@@ -647,8 +619,13 @@ function App() {
   }, [activeFile, autoSave, content, queueWorkspaceFileSync, recordRecentEdit, saveQueue]);
 
   const closeWorkspace = async () => {
+    if (hasPendingSettingsWrite()) {
+      setError("配置正在保存，请稍候再关闭工作区。");
+      return;
+    }
     try {
       await flushPendingSave();
+      await closeWorkspaceSettings();
       activeFileRef.current = null;
       setDirectoryContextMenu(null);
       setCreatingEntry(null);
@@ -666,8 +643,8 @@ function App() {
       replaceImageUrl(null);
       setOfficeData(null);
       setWorkspace(null);
+      setWorkspaceId(null);
       setError("");
-      localStorage.removeItem(WORKSPACE_STORAGE_KEY);
     } catch (reason) {
       setError(String(reason));
     }
@@ -767,8 +744,16 @@ function App() {
   const changeOpenTabLimit = useCallback(async (limit: number) => {
     if (!Number.isInteger(limit) || limit < 1) return;
 
-    setOpenTabLimit(limit);
-    localStorage.setItem(OPEN_TAB_LIMIT_STORAGE_KEY, String(limit));
+    setPreferenceSaving(true);
+    try {
+      await updateAppPreference({ key: "openTabLimit", value: limit });
+      setOpenTabLimit(limit);
+    } catch (reason) {
+      setError(`打开页签数量保存失败，请重新提交：${String(reason)}`);
+      return;
+    } finally {
+      setPreferenceSaving(false);
+    }
     if (openTabs.length <= limit) return;
 
     try {
@@ -790,6 +775,47 @@ function App() {
     }
   }, [flushPendingSave, openFile, openTabs]);
 
+  const changeAutoSave = async (enabled: boolean) => {
+    setPreferenceSaving(true);
+    try {
+      await updateAppPreference({ key: "autoSave", value: enabled });
+      setAutoSave(enabled);
+      if (!enabled && saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        setSaveState("saved");
+      }
+    } catch (reason) {
+      setError(`自动保存配置失败，请重新提交：${String(reason)}`);
+    } finally {
+      setPreferenceSaving(false);
+    }
+  };
+
+  const changeThemeColor = async (value: ThemeColor) => {
+    setPreferenceSaving(true);
+    try {
+      await updateAppPreference({ key: "themeColor", value });
+      setThemeColor(value);
+    } catch (reason) {
+      setError(`主题色保存失败，请重新提交：${String(reason)}`);
+    } finally {
+      setPreferenceSaving(false);
+    }
+  };
+
+  const changeContentWidth = async (value: ContentWidth) => {
+    setPreferenceSaving(true);
+    try {
+      await updateAppPreference({ key: "contentWidth", value });
+      setContentWidth(value);
+    } catch (reason) {
+      setError(`内容宽度保存失败，请重新提交：${String(reason)}`);
+    } finally {
+      setPreferenceSaving(false);
+    }
+  };
+
   const showQuickAccessView = useCallback(async (view: "recent" | "favorites") => {
     if (!workspace) return;
 
@@ -803,25 +829,22 @@ function App() {
     }
   }, [flushPendingSave, workspace]);
 
-  const toggleActiveFileFavorite = useCallback(() => {
+  const toggleActiveFileFavorite = useCallback(async () => {
     const file = activeFileRef.current;
-    if (!file || file.kind !== "markdown") return;
+    if (!file || file.kind !== "markdown" || workspaceId === null || favoriteSaving) return;
 
-    const current = readFavoriteDocuments(file.root);
-    const exists = current.some((document) => document.path === file.path);
-    const nextDocuments = exists
-      ? current.filter((document) => document.path !== file.path)
-      : [{
-          root: file.root,
-          path: file.path,
-          name: file.name,
-          relativePath: workspaceRelativePath(file.root, file.path, file.name),
-          favoritedAt: Date.now(),
-        }, ...current];
-
-    writeFavoriteDocuments(file.root, nextDocuments);
-    setFavoriteDocuments(nextDocuments);
-  }, []);
+    const favorite = !favoriteDocuments.some((document) => document.path === file.path);
+    setFavoriteSaving(true);
+    try {
+      const preferences = await setDocumentFavorite(workspaceId, file.path, favorite);
+      setFavoriteDocuments(preferences.favorites);
+      setRecentEditedDocuments(preferences.recent);
+    } catch (reason) {
+      setError(`收藏状态保存失败，请重新提交：${String(reason)}`);
+    } finally {
+      setFavoriteSaving(false);
+    }
+  }, [favoriteDocuments, favoriteSaving, workspaceId]);
 
   const openRecentEditedDocument = useCallback(async (document: RecentEditedDocument) => {
     const opened = await openFile({
@@ -832,11 +855,7 @@ function App() {
     });
 
     if (!opened) {
-      setRecentEditedDocuments((current) => {
-        const nextDocuments = current.filter((item) => item.path !== document.path);
-        writeRecentEditedDocuments(document.root, nextDocuments);
-        return nextDocuments;
-      });
+      setRecentEditedDocuments((current) => current.filter((item) => item.path !== document.path));
     }
   }, [openFile]);
 
@@ -849,11 +868,7 @@ function App() {
     });
 
     if (!opened) {
-      setFavoriteDocuments((current) => {
-        const nextDocuments = current.filter((item) => item.path !== document.path);
-        writeFavoriteDocuments(document.root, nextDocuments);
-        return nextDocuments;
-      });
+      setFavoriteDocuments((current) => current.filter((item) => item.path !== document.path));
     }
   }, [openFile]);
 
@@ -1005,43 +1020,11 @@ function App() {
         };
       }));
 
-      const renamedRecentDocuments = readRecentEditedDocuments(workspace.root).map((document) => {
-        const affected = node.isDir
-          ? isPathInsideDirectory(document.path, node.path)
-          : document.path === node.path;
-        if (!affected) return document;
-
-        const nextPath = node.isDir
-          ? replaceDirectoryPath(document.path, node.path, renamedPath)
-          : renamedPath;
-        return {
-          ...document,
-          path: nextPath,
-          name: pathFileName(nextPath),
-          relativePath: workspaceRelativePath(workspace.root, nextPath, pathFileName(nextPath)),
-        };
-      });
-      writeRecentEditedDocuments(workspace.root, renamedRecentDocuments);
-      setRecentEditedDocuments(renamedRecentDocuments);
-
-      const renamedFavorites = readFavoriteDocuments(workspace.root).map((document) => {
-        const affected = node.isDir
-          ? isPathInsideDirectory(document.path, node.path)
-          : document.path === node.path;
-        if (!affected) return document;
-
-        const nextPath = node.isDir
-          ? replaceDirectoryPath(document.path, node.path, renamedPath)
-          : renamedPath;
-        return {
-          ...document,
-          path: nextPath,
-          name: pathFileName(nextPath),
-          relativePath: workspaceRelativePath(workspace.root, nextPath, pathFileName(nextPath)),
-        };
-      });
-      writeFavoriteDocuments(workspace.root, renamedFavorites);
-      setFavoriteDocuments(renamedFavorites);
+      if (workspaceId !== null) {
+        const preferences = await remapWorkspaceDocuments(workspaceId, node.path, renamedPath);
+        setRecentEditedDocuments(preferences.recent);
+        setFavoriteDocuments(preferences.favorites);
+      }
 
       const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
       setWorkspace(tree);
@@ -1051,7 +1034,7 @@ function App() {
       setError(`无法重命名${entryLabel}：${String(reason)}`);
       return false;
     }
-  }, [flushPendingSave, workspace]);
+  }, [flushPendingSave, workspace, workspaceId]);
 
   const deleteTreeNode = useCallback(async (node: FileTreeNode) => {
     if (!workspace) return;
@@ -1085,21 +1068,11 @@ function App() {
         path: node.path,
       });
 
-      const remainingRecentDocuments = readRecentEditedDocuments(workspace.root).filter((document) => (
-        node.isDir
-          ? !isPathInsideDirectory(document.path, node.path)
-          : document.path !== node.path
-      ));
-      writeRecentEditedDocuments(workspace.root, remainingRecentDocuments);
-      setRecentEditedDocuments(remainingRecentDocuments);
-
-      const remainingFavorites = readFavoriteDocuments(workspace.root).filter((document) => (
-        node.isDir
-          ? !isPathInsideDirectory(document.path, node.path)
-          : document.path !== node.path
-      ));
-      writeFavoriteDocuments(workspace.root, remainingFavorites);
-      setFavoriteDocuments(remainingFavorites);
+      if (workspaceId !== null) {
+        const preferences = await removeWorkspaceDocuments(workspaceId, node.path);
+        setRecentEditedDocuments(preferences.recent);
+        setFavoriteDocuments(preferences.favorites);
+      }
 
       if (deletesCurrentFile) {
         activeFileRef.current = null;
@@ -1130,7 +1103,7 @@ function App() {
     } catch (reason) {
       setError(`已删除${entryLabel}，但无法刷新目录：${String(reason)}`);
     }
-  }, [flushPendingSave, openFile, openTabs, replaceImageUrl, workspace]);
+  }, [flushPendingSave, openFile, openTabs, replaceImageUrl, workspace, workspaceId]);
 
   const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
     setSyncState("syncing");
@@ -1140,7 +1113,14 @@ function App() {
       const settings = await loadOssSyncSettings();
       if (!settings) throw new Error("保存后未找到 OSS 配置");
       setOssSyncSettings(settings);
-      setOssSyncForm((form) => ({ ...form, accessKeySecret: "" }));
+      setOssSyncForm({
+        region: settings.region,
+        endpoint: settings.endpoint,
+        bucket: settings.bucket,
+        prefix: settings.prefix,
+        accessKeyId: settings.accessKeyId,
+        accessKeySecret: "",
+      });
       setSyncState("idle");
       setSyncMessage("OSS 配置已保存");
       return true;
@@ -1268,16 +1248,23 @@ function App() {
     image: displayShortcut(shortcutBindings.image),
   }) satisfies Record<EditorShortcutCommand, string>, [shortcutBindings]);
 
-  const updateShortcutBinding = useCallback((id: ShortcutId, chord: string) => {
+  const updateShortcutBinding = useCallback(async (id: ShortcutId, chord: string) => {
     const result = setShortcutBinding(shortcutBindings, id, chord);
     if (result.error) {
       setShortcutError(result.error);
       return;
     }
-    setShortcutBindings(result.bindings);
-    saveShortcutBindings(result.bindings);
-    setShortcutError("");
-    setShortcutRecording(null);
+    setShortcutSaving(true);
+    try {
+      await saveShortcutOverrides(shortcutOverrides(result.bindings));
+      setShortcutBindings(result.bindings);
+      setShortcutError("");
+      setShortcutRecording(null);
+    } catch (reason) {
+      setShortcutError(`快捷键保存失败，请重新提交：${String(reason)}`);
+    } finally {
+      setShortcutSaving(false);
+    }
   }, [shortcutBindings]);
 
   const handleShortcutRecording = (event: ReactKeyboardEvent<HTMLButtonElement>, id: ShortcutId) => {
@@ -1294,7 +1281,7 @@ function App() {
       setShortcutError("请按下包含 Ctrl/⌘ 或 Alt 的组合键，或单独按 F1–F12。");
       return;
     }
-    updateShortcutBinding(id, chord);
+    void updateShortcutBinding(id, chord);
   };
 
   useEffect(() => {
@@ -1387,6 +1374,10 @@ function App() {
   };
 
   const closeWindow = useCallback(async () => {
+    if (hasPendingSettingsWrite()) {
+      setError("配置正在保存，请稍候再关闭应用。");
+      return;
+    }
     try {
       await getCurrentWindow().destroy();
     } catch (reason) {
@@ -1427,6 +1418,7 @@ function App() {
       <button
         className={`icon-button favorite-toggle ${activeFileFavorited ? "active" : ""}`}
         onClick={toggleActiveFileFavorite}
+        disabled={favoriteSaving}
         title={shortcutTitle(activeFileFavorited ? "取消收藏" : "收藏文档", shortcutBindings.favorite)}
         aria-label={shortcutTitle(activeFileFavorited ? "取消收藏" : "收藏文档", shortcutBindings.favorite)}
         aria-pressed={activeFileFavorited}
@@ -2099,6 +2091,7 @@ function App() {
                           step="1"
                           value={openTabLimit}
                           aria-label="打开的 Tab 数量"
+                          disabled={preferenceSaving}
                           onChange={(event) => void changeOpenTabLimit(event.currentTarget.valueAsNumber)}
                         />
                       </label>
@@ -2111,16 +2104,8 @@ function App() {
                           type="checkbox"
                           checked={autoSave}
                           aria-label="自动保存"
-                          onChange={(event) => {
-                            const enabled = event.target.checked;
-                            setAutoSave(enabled);
-                            localStorage.setItem(AUTO_SAVE_STORAGE_KEY, String(enabled));
-                            if (!enabled && saveTimerRef.current !== null) {
-                              window.clearTimeout(saveTimerRef.current);
-                              saveTimerRef.current = null;
-                              setSaveState("saved");
-                            }
-                          }}
+                          disabled={preferenceSaving}
+                          onChange={(event) => void changeAutoSave(event.target.checked)}
                         />
                       </label>
                     </section>
@@ -2137,10 +2122,8 @@ function App() {
                           key={theme.id}
                           className={`theme-color-option ${themeColor === theme.id ? "active" : ""}`}
                           aria-pressed={themeColor === theme.id}
-                          onClick={() => {
-                            setThemeColor(theme.id);
-                            localStorage.setItem(THEME_COLOR_STORAGE_KEY, theme.id);
-                          }}
+                          disabled={preferenceSaving}
+                          onClick={() => void changeThemeColor(theme.id)}
                         >
                           <span className="theme-color-swatch" style={{ backgroundColor: theme.color }} />
                           <span>{theme.name}</span>
@@ -2156,10 +2139,8 @@ function App() {
                         <button
                           className={contentWidth === "default" ? "active" : ""}
                           aria-pressed={contentWidth === "default"}
-                          onClick={() => {
-                            setContentWidth("default");
-                            localStorage.setItem(CONTENT_WIDTH_STORAGE_KEY, "default");
-                          }}
+                          disabled={preferenceSaving}
+                          onClick={() => void changeContentWidth("default")}
                         >
                           <strong>默认</strong>
                           <small>限制正文宽度，便于长文阅读</small>
@@ -2167,10 +2148,8 @@ function App() {
                         <button
                           className={contentWidth === "full" ? "active" : ""}
                           aria-pressed={contentWidth === "full"}
-                          onClick={() => {
-                            setContentWidth("full");
-                            localStorage.setItem(CONTENT_WIDTH_STORAGE_KEY, "full");
-                          }}
+                          disabled={preferenceSaving}
+                          onClick={() => void changeContentWidth("full")}
                         >
                           <strong>全宽</strong>
                           <small>占满正文面板，保留左右留白</small>
@@ -2188,12 +2167,20 @@ function App() {
                       <button
                         className="shortcut-reset-all"
                         type="button"
-                        onClick={() => {
-                          setShortcutBindings({ ...DEFAULT_SHORTCUT_BINDINGS });
-                          saveShortcutBindings(DEFAULT_SHORTCUT_BINDINGS);
-                          setShortcutRecording(null);
-                          setShortcutError("");
-                        }}
+                        disabled={shortcutSaving}
+                        onClick={() => void (async () => {
+                          setShortcutSaving(true);
+                          try {
+                            await saveShortcutOverrides({});
+                            setShortcutBindings({ ...DEFAULT_SHORTCUT_BINDINGS });
+                            setShortcutRecording(null);
+                            setShortcutError("");
+                          } catch (reason) {
+                            setShortcutError(`快捷键保存失败，请重新提交：${String(reason)}`);
+                          } finally {
+                            setShortcutSaving(false);
+                          }
+                        })()}
                       >
                         恢复默认
                       </button>
@@ -2215,6 +2202,7 @@ function App() {
                               <button
                                 className={`shortcut-recorder ${recording ? "recording" : ""}`}
                                 type="button"
+                                disabled={shortcutSaving}
                                 aria-label={`修改${definition.label}快捷键`}
                                 aria-pressed={recording}
                                 onClick={() => {
@@ -2237,7 +2225,7 @@ function App() {
                     <div className="oss-sync-header">
                       <div className="settings-section-heading">
                         <h3>阿里云 OSS</h3>
-                        <p>使用静态 AccessKey 将当前笔记文件夹单向上传到 OSS。密钥保存于系统凭据库。</p>
+                        <p>使用静态 AccessKey 将当前笔记文件夹单向上传到 OSS。密钥保存在本地 SQLite 配置数据库中。</p>
                       </div>
                       <label className="oss-sync-enabled">
                         <input
@@ -2251,22 +2239,22 @@ function App() {
                     </div>
                     <div className="oss-sync-form">
                       <label>区域
-                        <input value={ossSyncForm.region} placeholder="oss-cn-hangzhou" onChange={(event) => setOssSyncForm((form) => ({ ...form, region: event.target.value }))} />
+                        <input value={ossSyncForm.region} disabled={syncState === "syncing"} placeholder="oss-cn-hangzhou" onChange={(event) => setOssSyncForm((form) => ({ ...form, region: event.target.value }))} />
                       </label>
                       <label>Endpoint
-                        <input value={ossSyncForm.endpoint} placeholder="https://oss-cn-hangzhou.aliyuncs.com" onChange={(event) => setOssSyncForm((form) => ({ ...form, endpoint: event.target.value }))} />
+                        <input value={ossSyncForm.endpoint} disabled={syncState === "syncing"} placeholder="https://oss-cn-hangzhou.aliyuncs.com" onChange={(event) => setOssSyncForm((form) => ({ ...form, endpoint: event.target.value }))} />
                       </label>
                       <label>Bucket
-                        <input value={ossSyncForm.bucket} placeholder="my-superwiki-backup" onChange={(event) => setOssSyncForm((form) => ({ ...form, bucket: event.target.value }))} />
+                        <input value={ossSyncForm.bucket} disabled={syncState === "syncing"} placeholder="my-superwiki-backup" onChange={(event) => setOssSyncForm((form) => ({ ...form, bucket: event.target.value }))} />
                       </label>
                       <label>远端目录
-                        <input value={ossSyncForm.prefix} placeholder="superwiki" onChange={(event) => setOssSyncForm((form) => ({ ...form, prefix: event.target.value }))} />
+                        <input value={ossSyncForm.prefix} disabled={syncState === "syncing"} placeholder="superwiki" onChange={(event) => setOssSyncForm((form) => ({ ...form, prefix: event.target.value }))} />
                       </label>
                       <label>AccessKey ID
-                        <input value={ossSyncForm.accessKeyId} autoComplete="off" onChange={(event) => setOssSyncForm((form) => ({ ...form, accessKeyId: event.target.value }))} />
+                        <input value={ossSyncForm.accessKeyId} disabled={syncState === "syncing"} autoComplete="off" onChange={(event) => setOssSyncForm((form) => ({ ...form, accessKeyId: event.target.value }))} />
                       </label>
                       <label>AccessKey Secret
-                        <input type="password" value={ossSyncForm.accessKeySecret} autoComplete="new-password" placeholder={ossSyncSettings?.hasAccessKeySecret ? "已保存；留空则不修改" : "请输入 AccessKey Secret"} onChange={(event) => setOssSyncForm((form) => ({ ...form, accessKeySecret: event.target.value }))} />
+                        <input type="password" value={ossSyncForm.accessKeySecret} disabled={syncState === "syncing"} autoComplete="new-password" placeholder={ossSyncSettings?.hasAccessKeySecret ? "已保存；留空则不修改" : "请输入 AccessKey Secret"} onChange={(event) => setOssSyncForm((form) => ({ ...form, accessKeySecret: event.target.value }))} />
                       </label>
                     </div>
                     <div className="oss-sync-actions">
@@ -2756,91 +2744,6 @@ function cleanHeadingText(text: string) {
   return cleaned || "未命名标题";
 }
 
-function readFavoriteStorage(): FavoriteStorage {
-  try {
-    const stored = localStorage.getItem(FAVORITE_STORAGE_KEY);
-    if (!stored) return {};
-    const parsed: unknown = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return parsed as FavoriteStorage;
-  } catch {
-    return {};
-  }
-}
-
-function readFavoriteDocuments(root: string) {
-  const documents = readFavoriteStorage()[root];
-  if (!Array.isArray(documents)) return [];
-
-  return documents.filter((document): document is FavoriteDocument => (
-    document !== null
-    && typeof document === "object"
-    && document.root === root
-    && typeof document.path === "string"
-    && typeof document.name === "string"
-    && typeof document.relativePath === "string"
-    && typeof document.favoritedAt === "number"
-    && Number.isFinite(document.favoritedAt)
-  ));
-}
-
-function writeFavoriteDocuments(root: string, documents: FavoriteDocument[]) {
-  try {
-    const storage = readFavoriteStorage();
-    if (documents.length > 0) storage[root] = documents;
-    else delete storage[root];
-    localStorage.setItem(FAVORITE_STORAGE_KEY, JSON.stringify(storage));
-  } catch {
-    // 收藏是辅助状态，写入失败不能影响文档编辑。
-  }
-}
-
-function filterExistingFavoriteDocuments(tree: WorkspaceTree, documents: FavoriteDocument[]) {
-  const markdownPaths = collectWorkspaceMarkdownPaths(tree);
-  return documents
-    .filter((document) => markdownPaths.has(document.path))
-    .sort((left, right) => right.favoritedAt - left.favoritedAt);
-}
-
-function readRecentEditedStorage(): RecentEditedStorage {
-  try {
-    const stored = localStorage.getItem(RECENT_EDITED_STORAGE_KEY);
-    if (!stored) return {};
-    const parsed: unknown = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return parsed as RecentEditedStorage;
-  } catch {
-    return {};
-  }
-}
-
-function readRecentEditedDocuments(root: string) {
-  const documents = readRecentEditedStorage()[root];
-  if (!Array.isArray(documents)) return [];
-
-  return documents.filter((document): document is RecentEditedDocument => (
-    document !== null
-    && typeof document === "object"
-    && document.root === root
-    && typeof document.path === "string"
-    && typeof document.name === "string"
-    && typeof document.relativePath === "string"
-    && typeof document.editedAt === "number"
-    && Number.isFinite(document.editedAt)
-  ));
-}
-
-function writeRecentEditedDocuments(root: string, documents: RecentEditedDocument[]) {
-  try {
-    const storage = readRecentEditedStorage();
-    if (documents.length > 0) storage[root] = documents;
-    else delete storage[root];
-    localStorage.setItem(RECENT_EDITED_STORAGE_KEY, JSON.stringify(storage));
-  } catch {
-    // 最近编辑是辅助状态，写入失败不能影响文档保存。
-  }
-}
-
 function collectMatchingMarkdownDocuments(nodes: FileTreeNode[], normalizedQuery: string) {
   const matches: FileTreeNode[] = [];
 
@@ -2856,26 +2759,6 @@ function collectMatchingMarkdownDocuments(nodes: FileTreeNode[], normalizedQuery
 
   collectMatches(nodes);
   return matches;
-}
-
-function collectWorkspaceMarkdownPaths(tree: WorkspaceTree) {
-  const markdownPaths = new Set<string>();
-  const collectMarkdownPaths = (nodes: FileTreeNode[]) => {
-    for (const node of nodes) {
-      if (node.isDir) collectMarkdownPaths(node.children);
-      else if (node.isMarkdown) markdownPaths.add(node.path);
-    }
-  };
-  collectMarkdownPaths(tree.children);
-  return markdownPaths;
-}
-
-function filterExistingRecentDocuments(tree: WorkspaceTree, documents: RecentEditedDocument[]) {
-  const markdownPaths = collectWorkspaceMarkdownPaths(tree);
-  return documents
-    .filter((document) => markdownPaths.has(document.path))
-    .sort((left, right) => right.editedAt - left.editedAt)
-    .slice(0, MAX_RECENT_EDITED_DOCUMENTS);
 }
 
 function formatRecentEditedTime(timestamp: number) {

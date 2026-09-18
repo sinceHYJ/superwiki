@@ -1,5 +1,6 @@
 import OSS from "ali-oss";
 import { invoke } from "@tauri-apps/api/core";
+import { invokeSettingsWrite } from "./settingsStore";
 
 export type OssSyncSettings = {
   region: string;
@@ -28,7 +29,7 @@ export async function loadOssSyncSettings() {
 export async function saveOssSyncSettings(settings: Omit<OssSyncSettings, "hasAccessKeySecret"> & {
   accessKeySecret?: string;
 }) {
-  await invoke("save_oss_sync_settings", { settings });
+  await invokeSettingsWrite("save_oss_sync_settings", { settings });
 }
 
 function createClient(credentials: OssSyncCredentials) {

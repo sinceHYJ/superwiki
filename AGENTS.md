@@ -10,7 +10,7 @@ SuperWiki 是一个纯本地桌面 Markdown 文件夹编辑器，采用：
 - **Markdown 编辑器**：Milkdown Crepe 7（所见即所得）
 - **Markdown 渲染**：react-markdown + remark-gfm
 
-项目没有独立 HTTP 服务、数据库、账号系统或云端同步。所有文件读取和写入均发生在用户主动选择的本地文件夹内。
+项目没有独立 HTTP 服务、账号系统或云端同步。Markdown 内容仍保存在用户主动选择的本地文件夹内；应用设置、工作区列表、收藏、最近编辑和 OSS 凭据保存在应用私有目录的 SQLite 数据库中。
 
 ## 2. 总体架构
 
@@ -37,7 +37,8 @@ Rust 本地文件服务（src-tauri/src/lib.rs）
   ├─ save_workspace_file
   ├─ read_workspace_image
   ├─ 路径规范化与根目录边界检查
-  └─ std::fs 本地文件读写
+  ├─ std::fs 本地文件读写
+  └─ rusqlite 应用配置读写（src-tauri/src/settings.rs）
           │
           ▼
 用户选择的本地文件夹
@@ -53,10 +54,14 @@ superwiki/
 │   ├── WysiwygEditor.tsx   # Milkdown Crepe 生命周期和 Markdown 同步
 │   ├── editorLanguages.ts  # CodeMirror 受控语言列表和按需加载
 │   ├── main.tsx            # React 入口
+│   ├── SettingsGate.tsx    # SQLite 启动读取、失败阻断与重试
+│   ├── settingsStore.ts    # 配置 IPC 类型与同步保存入口
 │   └── vite-env.d.ts
 ├── src-tauri/
 │   ├── src/
 │   │   ├── lib.rs          # Rust 文件服务和 Tauri 命令注册
+│   │   ├── settings.rs     # SQLite 配置服务
+│   │   ├── settings_schema.sql # 配置数据库结构
 │   │   └── main.rs         # 桌面程序入口
 │   ├── capabilities/
 │   │   └── default.json    # Tauri 权限声明
@@ -78,7 +83,7 @@ superwiki/
 - `content`：编辑器当前内容。
 - `viewMode`：`editor`、`split` 或 `preview`。
 - `saveState`：`saved`、`saving` 或 `error`。
-- `superwiki.workspaceRoot`：保存在 `localStorage` 中的上次打开目录。
+- 上次打开的工作区、工作区列表、收藏、最近编辑及界面设置由 `settingsStore.ts` 通过 Rust 命令保存在 SQLite 中。
 - 标题栏通过 `workspaceRelativePath` 只读展示当前文件相对于工作区根目录的路径。
 
 ### 4.2 文件夹选择
@@ -154,6 +159,8 @@ Rust 返回的数据使用 Serde 序列化：
 
 ### 5.2 Tauri 命令
 
+配置相关命令由 `src-tauri/src/settings.rs` 实现并在 `lib.rs` 注册，包括启动初始化、应用设置保存、工作区打开/关闭、收藏、最近编辑、路径重映射和 OSS 配置。SQLite 仅由 Rust 访问；前端不得直接执行 SQL。
+
 #### `list_workspace`
 
 ```text
@@ -223,6 +230,7 @@ Rust 返回的数据使用 Serde 序列化：
 - 从编辑器上传图片到当前 Markdown 文件同级的 `assets/` 目录，并插入相对路径。
 - 只读预览 PNG、JPEG、GIF、WebP、SVG、BMP 和 ICO 图片。
 - 编辑、分栏和预览模式。
+- 使用 SQLite 持久化应用设置、工作区列表、收藏、最近编辑与 OSS 配置。
 - GFM 表格、任务列表、删除线等 Markdown 扩展。
 
 当前不支持，除非用户明确要求，不要自行增加：
@@ -234,7 +242,7 @@ Rust 返回的数据使用 Serde 序列化：
 - 从 Markdown 中删除图片节点时，不会同步删除 `assets/` 目录中的实际图片文件；目前需要用户手动删除。
 - Git 集成或云同步。
 - 非 Markdown 文件编辑。
-- HTTP API、数据库或后台常驻服务。
+- HTTP API、Markdown 内容数据库或后台常驻服务。
 
 ## 7. 修改原则
 

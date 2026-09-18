@@ -902,6 +902,12 @@ async function closeWindow() {
 
 PlantUML 调用图使用官方语法并已人工核对；本轮 Node 环境缺少浏览器 window，未完成全部 SVG 渲染。上述检查不等于 rusqlite 构建、桌面集成测试或应用功能验收；未安装新增依赖、未修改应用代码或用户数据库。
 
+### 11.4 实施验证记录
+
+实施后已通过 `npx tsc --noEmit`、Rust 格式检查、19 个 Rust 测试及 `cargo clippy -- -D warnings`。测试覆盖 SQLite 默认值、工作区路径去重与自动 ID、工作区禁止删除、收藏记录按工作区隔离和外键拒绝未知工作区；静态检查确认业务代码不再访问 localStorage、旧 OSS JSON 路径或 keyring。
+
+仓库当前基线缺少已被历史提交删除的 `index.html`，因此 `npm run build` 在 Vite 解析入口阶段失败；`npm run test:updates` 也因基线缺少 `scripts/update-release.mjs` 无法启动。这两个失败发生在本次代码进入对应测试逻辑之前，未在本改动中恢复无关文件。
+
 ## 12. 官方参考与定位入口
 
 以下链接用于查 API 和设计依据；项目行为以 spec 与本文约定为准，不把开源库通用示例直接当成业务需求。
