@@ -37,7 +37,7 @@ function checkTypeScript(file, lines, errors) {
   let typeDepth = 0;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const declaration = /^\s*(?:export\s+)?(?:async\s+)?function\s+\w+|^\s*(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>|^\s*(?:export\s+)?(?:type|interface|enum|class)\s+\w+/.test(line);
+    const declaration = /^\s*(?:export\s+)?(?:async\s+)?function\s+\w+|^\s*(?:export\s+)?const\s+\w+\s*=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*=>|^\s*(?:export\s+)?type\s+\w+\s*=|^\s*(?:export\s+)?interface\s+\w+(?:\s+extends\s+[\w,\s]+)?\s*\{|^\s*(?:export\s+)?(?:enum|class)\s+\w+(?:\s+(?:extends|implements)\s+[\w,\s]+)?\s*\{/.test(line);
     if (declaration && !hasDocComment(lines, index)) errors.push(`${file}:${index + 1} 缺少定义级文档注释`);
 
     if (/^\s*(?:export\s+)?(?:type|interface)\s+\w+.*=\s*\{\s*$/.test(line) || /^\s*(?:export\s+)?interface\s+\w+\s*\{\s*$/.test(line)) typeDepth = 1;
