@@ -4,6 +4,7 @@
   "version": "0.8.3",
   "type": "module",
   "scripts": {
+    "test:settings": "node --test tests/settings.test.mjs",
     "test:updates": "node --test tests/updates.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
