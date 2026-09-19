@@ -4,6 +4,9 @@
   "version": "0.8.3",
   "type": "module",
   "scripts": {
+    "check:comments": "node scripts/check-code-comments.mjs",
+    "check:comments:changed": "node scripts/check-code-comments.mjs --changed origin/main",
+    "test:settings": "node --test tests/settings.test.mjs",
     "test:updates": "node --test tests/updates.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",

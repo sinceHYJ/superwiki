@@ -1720,3 +1720,25 @@ button.folder-placeholder:hover {
 .document-fullscreen .tab-bar {
   display: none;
 }
+.settings-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: #f5f7fa;
+  color: #27313d;
+}
+
+.settings-gate-card {
+  width: min(560px, 100%);
+  padding: 28px;
+  border: 1px solid #d9e0e8;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(28 39 51 / 10%);
+}
+
+.settings-gate-card h1 { margin: 0 0 12px; font-size: 20px; }
+.settings-gate-card p { margin: 0 0 16px; line-height: 1.6; }
+.settings-gate-card pre { overflow: auto; padding: 12px; border-radius: 8px; background: #f1f3f5; white-space: pre-wrap; }
+.settings-gate-card button { padding: 8px 18px; }
