@@ -8,7 +8,6 @@ use std::{
     io::{ErrorKind, Write},
     path::{Path, PathBuf},
 };
-use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
 /// SQLite 设置服务；仅通过下方异步命令暴露给前端。
