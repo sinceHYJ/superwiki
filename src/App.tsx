@@ -1,4 +1,4 @@
-import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -7,7 +7,9 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   ChevronRight,
+  CheckCircle2,
   Clock3,
+  Cloud,
   Copy,
   Eye,
   File,
@@ -21,6 +23,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
+  Pause,
   Pencil,
   RefreshCw,
   Save,
@@ -30,6 +33,8 @@ import {
   Settings,
   Star,
   Trash2,
+  TriangleAlert,
+  WifiOff,
   X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -57,14 +62,9 @@ import {
 } from "./shortcuts";
 import type { EditorHandle, EditorShortcutCommand } from "./WysiwygEditor";
 import { imageMimeType, proxyWorkspaceImage, resolveWorkspacePath } from "./workspaceImages";
-import {
-  loadOssSyncSettings,
-  saveOssSyncSettings,
-  syncWorkspace,
-  syncWorkspaceFile,
-  testOssSyncConnection,
-  type OssSyncSettings,
-} from "./ossSync";
+import { loadWorkspaceSyncSettings, removeWorkspaceSyncBinding, saveWorkspaceSyncSettings, type WorkspaceSyncSettings } from "./sync/config";
+import { InitialSyncConflictError, syncController } from "./sync/controller";
+import type { ConflictChoice, SyncPhase } from "./sync/types";
 import "./App.css";
 import AppUpdater from "./AppUpdater";
 import { collectUpdateDocuments, createSaveQueue } from "./updateSave";
@@ -97,7 +97,7 @@ type ViewMode = "editor" | "preview";
 type WorkspaceView = "document" | "recent" | "favorites";
 type SaveState = "saved" | "saving" | "error";
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
-type SyncState = "idle" | "syncing" | "error";
+type SettingsSyncState = "idle" | "syncing" | "error";
 
 type OssSyncForm = {
   region: string;
@@ -178,6 +178,18 @@ const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
   accessKeySecret: "",
 };
 
+function syncPhaseIcon(phase: SyncPhase) {
+  if (phase === "synced") return <CheckCircle2 size={14} />;
+  if (phase === "offline") return <WifiOff size={14} />;
+  if (phase === "paused") return <Pause size={14} />;
+  if (phase === "error" || phase === "conflicts") return <TriangleAlert size={14} />;
+  return <Cloud size={14} />;
+}
+
+function workspaceHasPath(nodes: FileTreeNode[], path: string): boolean {
+  return nodes.some((node) => node.path === path || (node.isDir && workspaceHasPath(node.children, path)));
+}
+
 function isThemeColor(value: string | null): value is ThemeColor {
   return THEME_COLORS.some((theme) => theme.id === value);
 }
@@ -240,10 +252,15 @@ function App() {
   const [openTabLimit, setOpenTabLimit] = useState(readOpenTabLimit);
   const [autoSave, setAutoSave] = useState(readAutoSave);
   const [contentWidth, setContentWidth] = useState<ContentWidth>(() => parseContentWidth(localStorage.getItem(CONTENT_WIDTH_STORAGE_KEY)));
-  const [ossSyncSettings, setOssSyncSettings] = useState<OssSyncSettings | null>(null);
+  const [ossSyncSettings, setOssSyncSettings] = useState<WorkspaceSyncSettings | null>(null);
   const [ossSyncForm, setOssSyncForm] = useState<OssSyncForm>(EMPTY_OSS_SYNC_FORM);
-  const [syncState, setSyncState] = useState<SyncState>("idle");
+  const [syncState, setSyncState] = useState<SettingsSyncState>("idle");
   const [syncMessage, setSyncMessage] = useState("");
+  const syncStatus = useSyncExternalStore(syncController.subscribe, syncController.getSnapshot);
+  const [syncDetailsOpen, setSyncDetailsOpen] = useState(false);
+  const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceTree | null>(null);
+  const [pendingWorkspaceRemember, setPendingWorkspaceRemember] = useState(true);
+  const [syncConflictChoices, setSyncConflictChoices] = useState<Record<string, ConflictChoice>>({});
   const [appVersion, setAppVersion] = useState("");
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => {
     const storedTheme = localStorage.getItem(THEME_COLOR_STORAGE_KEY);
@@ -277,7 +294,7 @@ function App() {
   const saveTimerRef = useRef<number | null>(null);
   const syncTimerRef = useRef<number | null>(null);
   const pathCopiedNoticeTimerRef = useRef<number | null>(null);
-  const pendingSyncFilesRef = useRef(new Map<string, Set<string>>());
+  const lastSyncRefreshRef = useRef("");
   const sidebarResizingRef = useRef(false);
 
   const replaceImageUrl = useCallback((url: string | null) => {
@@ -316,31 +333,13 @@ function App() {
 
   const queueWorkspaceFileSync = useCallback((root: string, path: string) => {
     if (!ossSyncSettings?.enabled || !ossSyncSettings.hasAccessKeySecret) return;
-
-    const pendingFiles = pendingSyncFilesRef.current.get(root) ?? new Set<string>();
-    pendingFiles.add(path);
-    pendingSyncFilesRef.current.set(root, pendingFiles);
+    void path;
     if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
-
     syncTimerRef.current = window.setTimeout(() => {
       syncTimerRef.current = null;
-      const files = [...(pendingSyncFilesRef.current.get(root) ?? [])];
-      pendingSyncFilesRef.current.delete(root);
-      if (!files.length) return;
-
-      setSyncState("syncing");
-      setSyncMessage(`正在同步 ${files.length} 个文件…`);
-      void Promise.all(files.map((filePath) => syncWorkspaceFile(root, filePath)))
-        .then(() => {
-          setSyncState("idle");
-          setSyncMessage(`已同步 ${files.length} 个文件`);
-        })
-        .catch((reason) => {
-          setSyncState("error");
-          setSyncMessage(`同步失败：${String(reason)}`);
-        });
+      if (workspace?.root === root) void syncController.syncNow().catch(() => undefined);
     }, 2000);
-  }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret]);
+  }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret, workspace?.root]);
 
   const flushPendingSave = useCallback(async (force = false) => {
     if (saveTimerRef.current !== null) {
@@ -471,10 +470,24 @@ function App() {
   }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
   const loadWorkspace = useCallback(async (root: string, remember = true) => {
+    let validatedTree: WorkspaceTree | null = null;
     setWorkspaceLoading(true);
     try {
       setError("");
-      const tree = await invoke<WorkspaceTree>("list_workspace", { root });
+      let tree = await invoke<WorkspaceTree>("list_workspace", { root });
+      validatedTree = tree;
+      try {
+        await syncController.open(tree.root);
+      } catch (reason) {
+        setPendingWorkspace(tree);
+        setPendingWorkspaceRemember(remember);
+        if (reason instanceof InitialSyncConflictError) {
+          setSyncConflictChoices({});
+          return;
+        }
+        throw reason;
+      }
+      tree = await invoke<WorkspaceTree>("list_workspace", { root: tree.root });
       const recentDocuments = filterExistingRecentDocuments(tree, readRecentEditedDocuments(tree.root));
       const favorites = filterExistingFavoriteDocuments(tree, readFavoriteDocuments(tree.root));
       setWorkspace(tree);
@@ -483,12 +496,13 @@ function App() {
       writeRecentEditedDocuments(tree.root, recentDocuments);
       writeFavoriteDocuments(tree.root, favorites);
       if (remember) localStorage.setItem(WORKSPACE_STORAGE_KEY, tree.root);
+      setPendingWorkspace(null);
     } catch (reason) {
       setWorkspace(null);
       setRecentEditedDocuments([]);
       setFavoriteDocuments([]);
-      localStorage.removeItem(WORKSPACE_STORAGE_KEY);
-      setError(`无法打开文件夹：${String(reason)}`);
+      if (!validatedTree) localStorage.removeItem(WORKSPACE_STORAGE_KEY);
+      setError(`无法完成启动同步：${String(reason)}`);
     } finally {
       setWorkspaceLoading(false);
     }
@@ -533,9 +547,18 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadOssSyncSettings()
+    if (!workspace) {
+      setOssSyncSettings(null);
+      setOssSyncForm(EMPTY_OSS_SYNC_FORM);
+      return;
+    }
+    void loadWorkspaceSyncSettings(workspace.root)
       .then((settings) => {
-        if (!settings) return;
+        if (!settings) {
+          setOssSyncSettings(null);
+          setOssSyncForm(EMPTY_OSS_SYNC_FORM);
+          return;
+        }
         setOssSyncSettings(settings);
         setOssSyncForm({
           region: settings.region,
@@ -547,7 +570,7 @@ function App() {
         });
       })
       .catch((reason) => setError(`无法读取 OSS 配置：${String(reason)}`));
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
     if (!directoryContextMenu) return;
@@ -649,6 +672,7 @@ function App() {
   const closeWorkspace = async () => {
     try {
       await flushPendingSave();
+      await syncController.close();
       activeFileRef.current = null;
       setDirectoryContextMenu(null);
       setCreatingEntry(null);
@@ -1133,11 +1157,16 @@ function App() {
   }, [flushPendingSave, openFile, openTabs, replaceImageUrl, workspace]);
 
   const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
+    if (!workspace) {
+      setSyncState("error");
+      setSyncMessage("请先打开一个工作区");
+      return false;
+    }
     setSyncState("syncing");
     setSyncMessage("正在保存 OSS 配置…");
     try {
-      await saveOssSyncSettings({ ...ossSyncForm, enabled });
-      const settings = await loadOssSyncSettings();
+      await saveWorkspaceSyncSettings(workspace.root, { ...ossSyncForm, enabled });
+      const settings = await loadWorkspaceSyncSettings(workspace.root);
       if (!settings) throw new Error("保存后未找到 OSS 配置");
       setOssSyncSettings(settings);
       setOssSyncForm((form) => ({ ...form, accessKeySecret: "" }));
@@ -1156,7 +1185,7 @@ function App() {
     setSyncState("syncing");
     setSyncMessage("正在测试 OSS 连接…");
     try {
-      await testOssSyncConnection();
+      await syncController.testConnection(workspace!.root);
       setSyncState("idle");
       setSyncMessage("OSS 连接正常");
     } catch (reason) {
@@ -1177,11 +1206,17 @@ function App() {
     setSyncMessage("正在准备同步…");
     try {
       await flushPendingSave();
-      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
-      const fileCount = await syncWorkspace(tree.root, tree.children);
+      await syncController.syncNow();
       setSyncState("idle");
-      setSyncMessage(`已同步 ${fileCount} 个文件`);
+      setSyncMessage("同步完成");
     } catch (reason) {
+      if (reason instanceof InitialSyncConflictError) {
+        setPendingWorkspace(workspace);
+        setPendingWorkspaceRemember(true);
+        setWorkspace(null);
+        setSyncConflictChoices({});
+        return;
+      }
       setSyncState("error");
       setSyncMessage(`同步失败：${String(reason)}`);
     }
@@ -1189,7 +1224,7 @@ function App() {
 
   const changeOssSyncEnabled = async (enabled: boolean) => {
     if (!enabled) {
-      await saveCurrentOssSyncSettings(false);
+      if (await saveCurrentOssSyncSettings(false) && workspace) await syncController.open(workspace.root);
       return;
     }
     if (!workspace) {
@@ -1202,11 +1237,17 @@ function App() {
     setSyncMessage("正在同步现有文件…");
     try {
       await flushPendingSave();
-      const tree = await invoke<WorkspaceTree>("list_workspace", { root: workspace.root });
-      const fileCount = await syncWorkspace(tree.root, tree.children);
+      await syncController.open(workspace.root);
       setSyncState("idle");
-      setSyncMessage(`同步完成，已同步 ${fileCount} 个文件`);
+      setSyncMessage("同步完成");
     } catch (reason) {
+      if (reason instanceof InitialSyncConflictError) {
+        setPendingWorkspace(workspace);
+        setPendingWorkspaceRemember(true);
+        setWorkspace(null);
+        setSyncConflictChoices({});
+        return;
+      }
       setSyncState("error");
       setSyncMessage(`同步失败：${String(reason)}`);
     }
@@ -1385,6 +1426,105 @@ function App() {
     if (event.buttons !== 1) return;
     void getCurrentWindow().startDragging();
   };
+
+  const removeCurrentSyncBinding = async () => {
+    if (!workspace) return;
+    try {
+      await removeWorkspaceSyncBinding(workspace.root);
+      setOssSyncSettings(null);
+      setOssSyncForm(EMPTY_OSS_SYNC_FORM);
+      setSyncMessage("已解除当前工作区的同步绑定");
+      await syncController.close();
+    } catch (reason) {
+      setSyncState("error");
+      setSyncMessage(`解绑失败：${String(reason)}`);
+    }
+  };
+
+  const openSyncSettings = () => {
+    setSyncDetailsOpen(false);
+    setSettingsSection("sync");
+    setSettingsOpen(true);
+  };
+
+  const activatePendingWorkspace = (tree: WorkspaceTree) => {
+    const recentDocuments = filterExistingRecentDocuments(tree, readRecentEditedDocuments(tree.root));
+    const favorites = filterExistingFavoriteDocuments(tree, readFavoriteDocuments(tree.root));
+    setWorkspace(tree);
+    setRecentEditedDocuments(recentDocuments);
+    setFavoriteDocuments(favorites);
+    writeRecentEditedDocuments(tree.root, recentDocuments);
+    writeFavoriteDocuments(tree.root, favorites);
+    if (pendingWorkspaceRemember) localStorage.setItem(WORKSPACE_STORAGE_KEY, tree.root);
+    setPendingWorkspace(null);
+    setError("");
+  };
+
+  const openPendingWorkspaceOffline = async () => {
+    if (!pendingWorkspace) return;
+    await syncController.openOffline(pendingWorkspace.root);
+    activatePendingWorkspace(pendingWorkspace);
+    setSyncMessage("当前以离线模式打开");
+  };
+
+  const retryPendingWorkspaceSync = async () => {
+    if (!pendingWorkspace) return;
+    await loadWorkspace(pendingWorkspace.root, pendingWorkspaceRemember);
+  };
+
+  const resolveInitialSyncConflicts = async () => {
+    if (!pendingWorkspace || syncStatus.conflicts.some((conflict) => !syncConflictChoices[conflict.path])) return;
+    setWorkspaceLoading(true);
+    try {
+      await syncController.open(pendingWorkspace.root, syncConflictChoices);
+      const tree = await invoke<WorkspaceTree>("list_workspace", { root: pendingWorkspace.root });
+      activatePendingWorkspace(tree);
+    } catch (reason) {
+      setError(`无法完成冲突处理：${String(reason)}`);
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!pendingWorkspace || syncStatus.phase !== "synced") return;
+    let cancelled = false;
+    void invoke<WorkspaceTree>("list_workspace", { root: pendingWorkspace.root })
+      .then((tree) => {
+        if (!cancelled) activatePendingWorkspace(tree);
+      })
+      .catch((reason) => setError(`同步完成，但无法刷新工作区：${String(reason)}`));
+    return () => { cancelled = true; };
+  }, [pendingWorkspace, syncStatus.phase]);
+
+  useEffect(() => {
+    if (syncStatus.phase === "checking" || syncStatus.phase === "syncing") {
+      lastSyncRefreshRef.current = "";
+      return;
+    }
+    if (!workspace || (syncStatus.phase !== "synced" && syncStatus.phase !== "conflicts")) return;
+    const refreshKey = `${syncStatus.phase}:${syncStatus.message}`;
+    if (lastSyncRefreshRef.current === refreshKey) return;
+    lastSyncRefreshRef.current = refreshKey;
+    const currentFile = activeFileRef.current;
+    void invoke<WorkspaceTree>("list_workspace", { root: workspace.root })
+      .then(async (tree) => {
+        setWorkspace(tree);
+        if (currentFile && workspaceHasPath(tree.children, currentFile.path)) {
+          await openFile(currentFile);
+        } else if (currentFile) {
+          activeFileRef.current = null;
+          loadedContent.current = "";
+          contentRef.current = "";
+          setActiveFile(null);
+          setOpenTabs((tabs) => tabs.filter((tab) => tab.path !== currentFile.path));
+          setContent("");
+          replaceImageUrl(null);
+          setOfficeData(null);
+        }
+      })
+      .catch((reason) => setError(`同步完成，但无法刷新目录：${String(reason)}`));
+  }, [openFile, replaceImageUrl, syncStatus.message, syncStatus.phase, workspace]);
 
   const closeWindow = useCallback(async () => {
     try {
@@ -1768,6 +1908,19 @@ function App() {
 
         {pathCopiedNotice && <div className="path-copied-notice" role="status">已复制到剪切板</div>}
 
+        {workspace && (
+          <button className={`sidebar-sync-status phase-${syncStatus.phase}`} onClick={() => setSyncDetailsOpen(true)}>
+            {syncPhaseIcon(syncStatus.phase)}
+            <span>
+              <strong>{syncStatus.message}</strong>
+              {syncStatus.progress && syncStatus.progress.total > 0 && (
+                <small>{syncStatus.progress.completed}/{syncStatus.progress.total}{syncStatus.progress.currentPath ? ` · ${syncStatus.progress.currentPath}` : ""}</small>
+              )}
+            </span>
+            <ChevronRight size={13} />
+          </button>
+        )}
+
         {!HAS_OVERLAY_TITLEBAR && (
           <div className="sidebar-footer">
             <button
@@ -1859,7 +2012,47 @@ function App() {
 
         {error && <div className="error-banner">{error}</div>}
 
-        {!workspace && !workspaceLoading && (
+        {pendingWorkspace && syncStatus.phase === "conflicts" && !workspaceLoading && (
+          <section className="sync-startup-card" aria-label="首次同步冲突">
+            <Cloud size={30} />
+            <h2>处理首次同步冲突</h2>
+            <p>以下路径在本地和云端内容不同。逐项选择后才能打开工作区。</p>
+            <div className="sync-conflict-actions">
+              <button onClick={() => setSyncConflictChoices(Object.fromEntries(syncStatus.conflicts.map((item) => [item.path, "remote"])))}>全部使用云端</button>
+              <button onClick={() => setSyncConflictChoices(Object.fromEntries(syncStatus.conflicts.map((item) => [item.path, "local"])))}>全部使用本地</button>
+              <button onClick={() => setSyncConflictChoices(Object.fromEntries(syncStatus.conflicts.map((item) => [item.path, "both"])))}>全部保留两份</button>
+            </div>
+            <div className="sync-conflict-list">
+              {syncStatus.conflicts.map((conflict) => (
+                <label key={conflict.path}>
+                  <span title={conflict.path}>{conflict.path}</span>
+                  <select value={syncConflictChoices[conflict.path] ?? ""} onChange={(event) => setSyncConflictChoices((current) => ({ ...current, [conflict.path]: event.target.value as ConflictChoice }))}>
+                    <option value="" disabled>请选择</option>
+                    <option value="remote">使用云端</option>
+                    <option value="local">使用本地</option>
+                    <option value="both">保留两份</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            <button className="primary" disabled={syncStatus.conflicts.some((conflict) => !syncConflictChoices[conflict.path])} onClick={() => void resolveInitialSyncConflicts()}>应用选择并打开</button>
+          </section>
+        )}
+
+        {pendingWorkspace && syncStatus.phase !== "conflicts" && !workspaceLoading && (
+          <section className="sync-startup-card" aria-label="启动同步失败">
+            <WifiOff size={30} />
+            <h2>无法完成启动同步</h2>
+            <p>{syncStatus.message}</p>
+            <div className="sync-conflict-actions">
+              <button className="primary" onClick={() => void retryPendingWorkspaceSync()}>重试</button>
+              <button onClick={() => void openPendingWorkspaceOffline()}>离线打开</button>
+              <button onClick={() => { setPendingWorkspace(null); localStorage.removeItem(WORKSPACE_STORAGE_KEY); }}>关闭工作区</button>
+            </div>
+          </section>
+        )}
+
+        {!workspace && !pendingWorkspace && !workspaceLoading && (
           <EmptyState
             icon={<img className="welcome-logo" src="/superwiki-logo.png" alt="SuperWiki" />}
             title="打开一个文件夹开始使用"
@@ -2023,6 +2216,42 @@ function App() {
           </Suspense>
         )}
       </section>
+
+      {syncDetailsOpen && (
+        <div className="settings-backdrop" onMouseDown={() => setSyncDetailsOpen(false)}>
+          <section className="sync-details-dialog" role="dialog" aria-modal="true" aria-labelledby="sync-details-title" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="settings-header">
+              <h2 id="sync-details-title">同步详情</h2>
+              <button onClick={() => setSyncDetailsOpen(false)} title="关闭" aria-label="关闭"><X size={18} /></button>
+            </header>
+            <div className="sync-details-body">
+              <div className={`sync-details-summary phase-${syncStatus.phase}`}>
+                {syncPhaseIcon(syncStatus.phase)}
+                <span><strong>{syncStatus.message}</strong>{syncStatus.remotePath && <small>远端：{syncStatus.remotePath}</small>}</span>
+              </div>
+              {syncStatus.phase === "disabled" ? (
+                <div className="sync-details-empty">
+                  <p>{ossSyncSettings ? "当前工作区的同步已关闭，请在同步设置中启用。" : "当前工作区尚未配置同步，请先在同步设置中连接 OSS。"}</p>
+                  <button className="primary" onClick={openSyncSettings}>打开同步设置</button>
+                </div>
+              ) : (
+                <>
+                  {syncStatus.inheritedFrom && <p className="sync-inherited-note">继承自工作区：{syncStatus.inheritedFrom}</p>}
+                  <div className="sync-detail-actions">
+                    {(syncStatus.phase === "syncing" || syncStatus.phase === "checking") && <button onClick={() => syncController.cancel()}>取消同步</button>}
+                    {syncStatus.phase === "paused" && <button className="primary" onClick={() => void syncController.resume()}>恢复同步</button>}
+                    {syncStatus.phase !== "syncing" && syncStatus.phase !== "checking" && syncStatus.phase !== "paused" && <button className="primary" onClick={() => void syncCurrentWorkspace()}>立即同步</button>}
+                  </div>
+                  <div className="sync-activity-list">
+                    {syncStatus.activities.map((activity, index) => <div key={`${activity.action}:${activity.path}:${index}`}><strong>{activity.message}</strong><span>{activity.path}</span></div>)}
+                    {!syncStatus.activities.length && <p>暂无同步记录</p>}
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {settingsOpen && (
         <div className="settings-backdrop" onMouseDown={() => setSettingsOpen(false)}>
@@ -2237,7 +2466,7 @@ function App() {
                     <div className="oss-sync-header">
                       <div className="settings-section-heading">
                         <h3>阿里云 OSS</h3>
-                        <p>使用静态 AccessKey 将当前笔记文件夹单向上传到 OSS。密钥保存于系统凭据库。</p>
+                        <p>当前工作区双向同步到 OSS。同步引擎与存储渠道独立，密钥保存于系统凭据库。</p>
                       </div>
                       <label className="oss-sync-enabled">
                         <input
@@ -2249,6 +2478,9 @@ function App() {
                         启用
                       </label>
                     </div>
+                    {ossSyncSettings?.inherited && (
+                      <p className="sync-binding-note">当前配置继承自 {ossSyncSettings.bindingRoot}，实际远端路径为 {ossSyncSettings.effectiveRemotePath}。保存配置会为当前文件夹创建独立绑定。</p>
+                    )}
                     <div className="oss-sync-form">
                       <label>区域
                         <input value={ossSyncForm.region} placeholder="oss-cn-hangzhou" onChange={(event) => setOssSyncForm((form) => ({ ...form, region: event.target.value }))} />
@@ -2273,6 +2505,7 @@ function App() {
                       <button onClick={() => void saveCurrentOssSyncSettings()} disabled={syncState === "syncing"}>保存配置</button>
                       <button onClick={() => void testCurrentOssSyncConnection()} disabled={syncState === "syncing"}>测试连接</button>
                       <button className="primary" onClick={() => void syncCurrentWorkspace()} disabled={syncState === "syncing"}>立即同步</button>
+                      {ossSyncSettings && !ossSyncSettings.inherited && <button className="danger" onClick={() => void removeCurrentSyncBinding()} disabled={syncState === "syncing"}>解除绑定</button>}
                     </div>
                     <p className={`oss-sync-status ${syncState === "error" ? "error" : ""}`} aria-live="polite">
                       {syncMessage || "启用后会先同步现有文件，之后在本地写入后自动同步。"}
