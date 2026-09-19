@@ -1,3 +1,7 @@
+/**
+ * SuperWiki 主界面：协调工作区树、编辑器、预览、自动保存及设置持久化后的界面状态。
+ * 本文件不直接读写浏览器持久化存储；应用设置、工作区偏好均通过 settingsStore 的 Tauri IPC 保存。
+ */
 import { Children, isValidElement, lazy, memo, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
 import { getVersion } from "@tauri-apps/api/app";
@@ -82,84 +86,141 @@ import {
   type BootstrapSettings,
 } from "./settingsStore";
 
+/** 工作区目录树节点，字段与 Rust `FileTreeNode` 的 camelCase 序列化保持一致。 */
 type FileTreeNode = {
+  /** 节点展示名称。 */
   name: string;
+  /** 节点绝对路径。 */
   path: string;
+  /** 是否为目录；目录节点才可展开 `children`。 */
   isDir: boolean;
+  /** 是否为可编辑 Markdown 文件。 */
   isMarkdown: boolean;
+  /** 是否为只读图片文件。 */
   isImage: boolean;
+  /** 是否为 Office 预览文件。 */
   isOffice: boolean;
+  /** 直接子节点；文件节点为空数组。 */
   children: FileTreeNode[];
 };
 
+/** 用户当前打开工作区的根信息和目录树。 */
 type WorkspaceTree = {
+  /** 工作区根目录绝对路径。 */
   root: string;
+  /** 工作区展示名称。 */
   name: string;
+  /** 根目录直接子节点。 */
   children: FileTreeNode[];
 };
 
+/** 编辑器、图片预览或 Office 预览中当前激活的文件。 */
 type ActiveFile = {
+  /** 所属工作区根目录。 */
   root: string;
+  /** 文件绝对路径。 */
   path: string;
+  /** 界面显示的文件名。 */
   name: string;
+  /** 文件处理模式，决定可编辑或只读预览。 */
   kind: "markdown" | "image" | "office";
 };
 
+/** 文档区显示模式。 */
 type ViewMode = "editor" | "preview";
+/** 左侧工作区当前展示的文档、最近编辑或收藏页。 */
 type WorkspaceView = "document" | "recent" | "favorites";
+/** 当前文件保存状态。 */
 type SaveState = "saved" | "saving" | "error";
+/** 应用可选择的主题色标识。 */
 type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
+/** OSS 同步任务状态。 */
 type SyncState = "idle" | "syncing" | "error";
 
+/** 设置面板中暂存的 OSS 表单；密钥只在当前内存中存在。 */
 type OssSyncForm = {
+  /** OSS 区域标识。 */
   region: string;
+  /** OSS Endpoint。 */
   endpoint: string;
+  /** 目标 Bucket。 */
   bucket: string;
+  /** Bucket 内对象前缀。 */
   prefix: string;
+  /** AccessKey ID。 */
   accessKeyId: string;
+  /** 待提交的新密钥；空值表示保留已存密钥。 */
   accessKeySecret: string;
 };
 
+/** 编辑器光标的 1 基行列位置。 */
 type CursorPosition = {
+  /** 当前行号，从 1 开始。 */
   line: number;
+  /** 当前列号，从 1 开始。 */
   column: number;
 };
 
+/** 文档大纲中的一个标题。 */
 type DocumentHeading = {
+  /** Markdown 标题等级，取值 1 至 6。 */
   level: number;
+  /** 去除 Markdown 标记后的标题文本。 */
   text: string;
 };
 
+/** 目录右键菜单的位置和目标节点。 */
 type DirectoryContextMenu = {
+  /** 被操作的目录树节点。 */
   node: FileTreeNode;
+  /** 是否为工作区根，根目录不允许部分操作。 */
   isWorkspaceRoot: boolean;
+  /** 菜单视口 X 坐标，单位为 CSS 像素。 */
   x: number;
+  /** 菜单视口 Y 坐标，单位为 CSS 像素。 */
   y: number;
 };
 
+/** 新建条目的种类。 */
 type CreateEntryKind = "file" | "directory";
 
+/** 正在创建的条目的父目录和类型。 */
 type CreatingEntry = {
+  /** 新条目的父目录绝对路径。 */
   parentPath: string;
+  /** 新建 Markdown 文件或目录。 */
   kind: CreateEntryKind;
 };
 
+/** 最近编辑列表展示的 Markdown 文档。 */
 type RecentEditedDocument = {
+  /** 所属工作区根目录。 */
   root: string;
+  /** 文档绝对路径。 */
   path: string;
+  /** 展示文件名。 */
   name: string;
+  /** 工作区内相对路径。 */
   relativePath: string;
+  /** 最近编辑时间的 Unix 毫秒时间戳。 */
   editedAt: number;
 };
 
+/** 收藏列表展示的 Markdown 文档。 */
 type FavoriteDocument = {
+  /** 所属工作区根目录。 */
   root: string;
+  /** 文档绝对路径。 */
   path: string;
+  /** 展示文件名。 */
   name: string;
+  /** 工作区内相对路径。 */
   relativePath: string;
+  /** 收藏时间的 Unix 毫秒时间戳。 */
   favoritedAt: number;
 };
 
+/** 以 `root:path` 为 key 的未落盘 Markdown 草稿映射；缺少 key 表示无草稿。 */
 type DocumentDrafts = Record<string, string>;
 
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
@@ -169,6 +230,7 @@ const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
   { id: "coral", name: "珊瑚粉", color: "#fda4af" },
   { id: "lavender", name: "薰衣草紫", color: "#c4b5fd" },
 ];
+/** 未配置 OSS 时显示的表单初始值；密钥始终保持空字符串，绝不回显。 */
 const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
   region: "",
   endpoint: "",
@@ -178,6 +240,7 @@ const EMPTY_OSS_SYNC_FORM: OssSyncForm = {
   accessKeySecret: "",
 };
 
+/** 将工作区根与绝对文件路径组合为唯一草稿 key。 */
 function documentDraftKey(file: Pick<ActiveFile, "root" | "path">) {
   return `${file.root}:${file.path}`;
 }
@@ -194,12 +257,18 @@ const OPEN_IN_FILE_MANAGER_LABEL = IS_MACOS
 const WysiwygEditor = lazy(() => import("./WysiwygEditor"));
 const OfficePreview = lazy(() => import("./OfficePreview"));
 
+/**
+ * 渲染已完成设置初始化的应用主界面。
+ *
+ * `initialSettings` 是 SettingsGate 从 SQLite 读取的启动快照；组件内后续修改必须先持久化再更新界面状态。
+ */
 function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const [updateOpen, setUpdateOpen] = useState(false);
   const installingUpdateRef = useRef(false);
   const openingFilesRef = useRef(0);
   const [saveQueue] = useState(() => createSaveQueue((document) => invoke<void>("save_workspace_file", document)));
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
+  // 仅在工作区已通过 SQLite 登记后存在，用于收藏、最近编辑、重命名和删除记录。
   const [workspaceId, setWorkspaceId] = useState<number | null>(null);
   const [activeFile, setActiveFile] = useState<ActiveFile | null>(null);
   const [openTabs, setOpenTabs] = useState<ActiveFile[]>([]);
@@ -225,6 +294,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const [shortcutBindings, setShortcutBindings] = useState<ShortcutBindings>(() => readShortcutBindings(initialSettings.shortcutOverrides));
   const [shortcutRecording, setShortcutRecording] = useState<ShortcutId | null>(null);
   const [shortcutError, setShortcutError] = useState("");
+  // 三类异步设置写入分别控制交互禁用，避免后写入覆盖先写入或关闭窗口时中断保存。
   const [shortcutSaving, setShortcutSaving] = useState(false);
   const [preferenceSaving, setPreferenceSaving] = useState(false);
   const [favoriteSaving, setFavoriteSaving] = useState(false);
@@ -265,12 +335,14 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const pendingSyncFilesRef = useRef(new Map<string, Set<string>>());
   const sidebarResizingRef = useRef(false);
 
+  /** @param url 新 Blob URL，`null` 表示清空。@returns 无。@sideEffect 释放旧 URL 并更新图片预览状态。 */
   const replaceImageUrl = useCallback((url: string | null) => {
     if (imageUrlRef.current) URL.revokeObjectURL(imageUrlRef.current);
     imageUrlRef.current = url;
     setImageUrl(url);
   }, []);
 
+  /** @returns 编辑器当前 Markdown；编辑器未就绪时返回内容引用快照。@sideEffect 用最新编辑器值同步 React 状态。 */
   const syncEditorContent = useCallback(() => {
     const latestMarkdown = editorHandleRef.current?.getMarkdown();
     if (latestMarkdown === undefined) return contentRef.current;
@@ -280,6 +352,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     return latestMarkdown;
   }, []);
 
+  /** 将已保存的 Markdown 文件记录到 SQLite，并用服务端清理后的偏好刷新两类快捷访问列表。 */
   const recordRecentEdit = useCallback(async (file: ActiveFile) => {
     if (file.kind !== "markdown" || workspaceId === null) return;
     try {
@@ -291,6 +364,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [workspaceId]);
 
+  /** @param root 工作区根路径。@param path 已保存文件路径。@returns 无。@sideEffect 按根目录去重并延迟提交 OSS 单文件同步。 */
   const queueWorkspaceFileSync = useCallback((root: string, path: string) => {
     if (!ossSyncSettings?.enabled || !ossSyncSettings.hasAccessKeySecret) return;
 
@@ -319,6 +393,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }, 2000);
   }, [ossSyncSettings?.enabled, ossSyncSettings?.hasAccessKeySecret]);
 
+  /** @param force 为 `true` 时忽略关闭自动保存设置。@returns 保存完成后的 Promise。@throws 写盘失败时拒绝。@sideEffect 清除定时器、写文件并更新最近编辑及同步队列。 */
   const flushPendingSave = useCallback(async (force = false) => {
     if (saveTimerRef.current !== null) {
       window.clearTimeout(saveTimerRef.current);
@@ -348,8 +423,14 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     queueWorkspaceFileSync(file.root, file.path);
   }, [autoSave, queueWorkspaceFileSync, recordRecentEdit, saveQueue, syncEditorContent]);
 
+  /**
+   * 在安装更新前保存所有草稿，并拒绝配置写入或文件切换中的更新。
+   *
+   * 任一文档保存失败时恢复完整草稿快照，避免部分成功后丢失未保存内容。
+   */
   const prepareUpdateInstall = async () => {
     if (openingFilesRef.current) throw new Error("文档正在切换，请稍后重试安装。");
+    // 更新会销毁当前进程，必须等待 SQLite 写事务结束。
     if (hasPendingSettingsWrite()) throw new Error("配置正在保存，请稍后重试安装。");
     installingUpdateRef.current = true;
     if (saveTimerRef.current !== null) {
@@ -372,6 +453,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     setSaveState("saved");
   };
 
+  /** @returns 手动保存流程的 Promise。@sideEffect 强制刷新当前 Markdown，并更新保存或错误状态。 */
   const saveCurrentFile = useCallback(async () => {
     try {
       setError("");
@@ -384,6 +466,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [flushPendingSave]);
 
+  /** @param file 待打开的工作区文件及其预览类别。@returns 打开成功为 `true`。@sideEffect 保存当前文件、读取目标内容并更新页签、编辑器或预览状态。 */
   const openFile = useCallback(async (file: ActiveFile) => {
     if (installingUpdateRef.current) return false;
     openingFilesRef.current += 1;
@@ -448,6 +531,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
+  /** 打开并登记工作区，同时用 Rust 返回的偏好快照替换当前快捷访问数据。 */
   const loadWorkspace = useCallback(async (root: string) => {
     setWorkspaceLoading(true);
     try {
@@ -468,7 +552,9 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, []);
 
+  /** 请求用户选择新工作区；切换前会等待配置写入并保存当前 Markdown。 */
   const selectWorkspace = async () => {
+    // 防止切换后工作区状态已改变、旧工作区相关偏好仍在写入。
     if (hasPendingSettingsWrite()) {
       setError("配置正在保存，请稍候再切换工作区。");
       return;
@@ -513,7 +599,9 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   useEffect(() => {
     if (!directoryContextMenu) return;
 
+    /** @returns 无。@sideEffect 关闭当前目录右键菜单。 */
     const closeMenu = () => setDirectoryContextMenu(null);
+    /** @param event 全局键盘事件。@returns 无。@sideEffect Escape 时关闭目录菜单。 */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeMenu();
     };
@@ -528,6 +616,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   useEffect(() => {
     if (!documentFullscreen) return;
 
+    /** @param event 全局键盘事件。@returns 无。@sideEffect Escape 时退出文档全屏。 */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setDocumentFullscreen(false);
     };
@@ -561,6 +650,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   useEffect(() => {
     if (!settingsOpen) return;
 
+    /** @param event 全局键盘事件。@returns 无。@sideEffect Escape 时关闭设置对话框。 */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSettingsOpen(false);
     };
@@ -618,6 +708,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     };
   }, [activeFile, autoSave, content, queueWorkspaceFileSync, recordRecentEdit, saveQueue]);
 
+  /** @returns 关闭工作区流程的 Promise。@sideEffect 等待写入、保存当前文档、清空界面状态并清除最近工作区标记。 */
   const closeWorkspace = async () => {
     if (hasPendingSettingsWrite()) {
       setError("配置正在保存，请稍候再关闭工作区。");
@@ -650,6 +741,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** @param value 编辑器最新 Markdown 文本。@returns 无。@sideEffect 更新草稿、内容引用和 React 内容状态。 */
   const handleEditorChange = useCallback((value: string) => {
     const file = activeFileRef.current;
     if (file?.kind === "markdown") {
@@ -665,14 +757,17 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     setContent(value);
   }, []);
 
+  /** @param handle 编辑器暴露的同步读取句柄；卸载时为 `null`。@returns 无。@sideEffect 保存句柄引用。 */
   const handleEditorReady = useCallback((handle: EditorHandle | null) => {
     editorHandleRef.current = handle;
   }, []);
 
+  /** @param position 编辑器报告的 1 基光标位置。@returns 无。@sideEffect 更新状态栏位置。 */
   const handleCursorPositionChange = useCallback((position: CursorPosition) => {
     setCursorPosition(position);
   }, []);
 
+  /** @param source 可选的已上传资源相对路径。@returns 无。@sideEffect 排队同步资源并重新读取目录树。 */
   const handleAssetUploaded = useCallback((source?: string) => {
     const file = activeFileRef.current;
     if (!file) return;
@@ -684,6 +779,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
       .catch((reason) => setError(`无法刷新目录：${String(reason)}`));
   }, [queueWorkspaceFileSync]);
 
+  /** @param file 目录树中待打开文件节点。@returns 无。@sideEffect 按节点类型调用打开流程。 */
   const openTreeFile = useCallback((file: FileTreeNode) => {
     if (!workspace) return;
     void openFile({
@@ -694,6 +790,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     });
   }, [openFile, workspace]);
 
+  /** @param tab 待关闭页签。@returns 关闭流程 Promise。@sideEffect 保存活动页、更新页签与激活文件状态。 */
   const closeTab = useCallback(async (tab: ActiveFile) => {
     const tabIndex = openTabs.findIndex((item) => item.root === tab.root && item.path === tab.path);
     if (tabIndex === -1) return;
@@ -741,6 +838,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [flushPendingSave, openFile, openTabs, replaceImageUrl]);
 
+  /** 持久化页签上限；减少上限时先保存当前文档再裁剪多余页签。 */
   const changeOpenTabLimit = useCallback(async (limit: number) => {
     if (!Number.isInteger(limit) || limit < 1) return;
 
@@ -775,6 +873,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [flushPendingSave, openFile, openTabs]);
 
+  /** 持久化自动保存开关；关闭时取消尚未触发的自动保存定时器。 */
   const changeAutoSave = async (enabled: boolean) => {
     setPreferenceSaving(true);
     try {
@@ -792,6 +891,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** 持久化主题色；仅在数据库写入成功后更新当前界面。 */
   const changeThemeColor = async (value: ThemeColor) => {
     setPreferenceSaving(true);
     try {
@@ -804,6 +904,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** 持久化内容宽度；仅在数据库写入成功后更新当前界面。 */
   const changeContentWidth = async (value: ContentWidth) => {
     setPreferenceSaving(true);
     try {
@@ -816,6 +917,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** @param view 待显示的快捷访问页。@returns 切换流程 Promise。@sideEffect 保存当前文件后更新工作区视图。 */
   const showQuickAccessView = useCallback(async (view: "recent" | "favorites") => {
     if (!workspace) return;
 
@@ -829,6 +931,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [flushPendingSave, workspace]);
 
+  /** 切换当前 Markdown 的收藏状态，并用 SQLite 返回的完整偏好快照更新界面。 */
   const toggleActiveFileFavorite = useCallback(async () => {
     const file = activeFileRef.current;
     if (!file || file.kind !== "markdown" || workspaceId === null || favoriteSaving) return;
@@ -846,6 +949,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [favoriteDocuments, favoriteSaving, workspaceId]);
 
+  /** @param document 最近编辑记录。@returns 打开流程 Promise。@sideEffect 打开失败时移除失效的本地展示项。 */
   const openRecentEditedDocument = useCallback(async (document: RecentEditedDocument) => {
     const opened = await openFile({
       root: document.root,
@@ -859,6 +963,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [openFile]);
 
+  /** @param document 收藏记录。@returns 打开流程 Promise。@sideEffect 打开失败时移除失效的本地展示项。 */
   const openFavoriteDocument = useCallback(async (document: FavoriteDocument) => {
     const opened = await openFile({
       root: document.root,
@@ -872,6 +977,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [openFile]);
 
+  /** @param event 触发菜单的鼠标事件。@param node 目标节点。@param isWorkspaceRoot 是否根目录。@returns 无。@sideEffect 阻止默认菜单并记录菜单位置。 */
   const openDirectoryContextMenu = useCallback((
     event: React.MouseEvent,
     node: FileTreeNode,
@@ -888,6 +994,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     });
   }, []);
 
+  /** @param node 待复制绝对路径的节点。@returns 复制流程 Promise。@sideEffect 写入系统剪贴板并显示短暂提示。 */
   const copyAbsolutePath = useCallback(async (node: FileTreeNode) => {
     setDirectoryContextMenu(null);
     try {
@@ -904,6 +1011,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, []);
 
+  /** @param node 待在系统文件管理器中显示的节点。@returns 打开流程 Promise。@sideEffect 调用 Rust 系统打开命令。 */
   const openInFileManager = useCallback(async (node: FileTreeNode) => {
     if (!workspace) return;
 
@@ -919,6 +1027,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [workspace]);
 
+  /** @param parentPath 新条目的父目录。@param kind 新建文件或目录。@param inputName 用户输入名称。@returns 成功为 `true`。@sideEffect 保存当前文件、创建条目、刷新树并可能打开新文件。 */
   const createWorkspaceEntry = useCallback(async (
     parentPath: string,
     kind: CreateEntryKind,
@@ -964,6 +1073,11 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     return true;
   }, [flushPendingSave, openFile, workspace]);
 
+  /**
+   * 重命名文件或目录，并同步内存页签及 SQLite 中受影响的收藏、最近编辑路径。
+   *
+   * 工作区 ID 缺失时只更新文件系统与内存状态，避免向未知工作区写入偏好。
+   */
   const renameTreeNode = useCallback(async (node: FileTreeNode, inputName: string) => {
     if (!workspace) return false;
     const newName = inputName.trim();
@@ -1020,6 +1134,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
         };
       }));
 
+      // 设置表保存的是相对路径，目录重命名必须连同全部后代一次迁移。
       if (workspaceId !== null) {
         const preferences = await remapWorkspaceDocuments(workspaceId, node.path, renamedPath);
         setRecentEditedDocuments(preferences.recent);
@@ -1036,6 +1151,11 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [flushPendingSave, workspace, workspaceId]);
 
+  /**
+   * 经用户确认后永久删除文件或目录，并清理内存页签和 SQLite 中对应的文档偏好。
+   *
+   * 删除当前文档前先刷新待保存内容；删除成功后再清理偏好，避免记录指向不存在文件。
+   */
   const deleteTreeNode = useCallback(async (node: FileTreeNode) => {
     if (!workspace) return;
     const entryLabel = node.isDir ? "文件夹" : "文件";
@@ -1068,6 +1188,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
         path: node.path,
       });
 
+      // 目录删除要连同后代的收藏和最近编辑记录一并清理。
       if (workspaceId !== null) {
         const preferences = await removeWorkspaceDocuments(workspaceId, node.path);
         setRecentEditedDocuments(preferences.recent);
@@ -1105,6 +1226,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [flushPendingSave, openFile, openTabs, replaceImageUrl, workspace, workspaceId]);
 
+  /** 保存当前 OSS 表单并重新读取脱敏配置，以清空内存中的密钥输入值。 */
   const saveCurrentOssSyncSettings = async (enabled = ossSyncSettings?.enabled ?? false) => {
     setSyncState("syncing");
     setSyncMessage("正在保存 OSS 配置…");
@@ -1131,6 +1253,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** @returns OSS 连通性测试 Promise。@sideEffect 临时上传/删除测试对象，并更新同步状态提示。 */
   const testCurrentOssSyncConnection = async () => {
     if (!await saveCurrentOssSyncSettings()) return;
     setSyncState("syncing");
@@ -1145,6 +1268,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** @returns 全工作区同步 Promise。@sideEffect 上传树内文件并更新同步状态提示。 */
   const syncCurrentWorkspace = async () => {
     if (!workspace) {
       setSyncState("error");
@@ -1167,6 +1291,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   };
 
+  /** @param enabled 是否启用 OSS 自动同步。@returns 保存流程 Promise。@sideEffect 通过当前表单持久化启用状态。 */
   const changeOssSyncEnabled = async (enabled: boolean) => {
     if (!enabled) {
       await saveCurrentOssSyncSettings(false);
@@ -1196,8 +1321,10 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const documentHeadings = useMemo(() => extractDocumentHeadings(previewContent), [previewContent]);
   const documentStatistics = useMemo(() => getDocumentStatistics(content), [content]);
 
+  /** @param index 大纲标题在预览 DOM 中的索引。@returns 无。@sideEffect 将预览滚动到对应标题。 */
   const scrollToHeading = useCallback((index: number) => {
     const selector = "h1, h2, h3, h4, h5, h6";
+    /** @param pane 待滚动的预览容器，`null` 时不操作。@returns 无。@sideEffect 平滑滚动指定标题到容器顶部。 */
     const scrollInPane = (pane: HTMLElement | null) => {
       pane?.querySelectorAll<HTMLElement>(selector)[index]?.scrollIntoView({
         behavior: "smooth",
@@ -1222,11 +1349,13 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     if (viewMode !== "editor") scrollInPane(previewPaneRef.current);
   }, [viewMode]);
 
+  /** @param mode 待切换的编辑或预览模式。@returns 无。@sideEffect 必要时保存当前文档并更新视图模式。 */
   const changeViewMode = (mode: ViewMode) => {
     if (mode === "preview") syncEditorContent();
     setViewMode(mode);
   };
 
+  /** @returns 进入只读全屏的 Promise。@sideEffect 保存当前文件并将文档设为全屏展示。 */
   const enterDocumentFullscreen = async () => {
     try {
       setError("");
@@ -1248,6 +1377,8 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     image: displayShortcut(shortcutBindings.image),
   }) satisfies Record<EditorShortcutCommand, string>, [shortcutBindings]);
 
+  /** 校验并保存一项快捷键覆盖；持久化失败时保留现有绑定，避免界面与数据库不一致。 */
+  /** @param id 待更新的快捷键动作。@param chord 候选标准组合键。@returns 保存流程 Promise。@sideEffect 校验并持久化成功绑定，或更新错误状态。 */
   const updateShortcutBinding = useCallback(async (id: ShortcutId, chord: string) => {
     const result = setShortcutBinding(shortcutBindings, id, chord);
     if (result.error) {
@@ -1267,6 +1398,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [shortcutBindings]);
 
+  /** @param event 快捷键录制按钮的键盘事件。@param id 正在录制的动作 ID。@returns 无。@sideEffect 阻止默认行为，并可能保存绑定或更新错误状态。 */
   const handleShortcutRecording = (event: ReactKeyboardEvent<HTMLButtonElement>, id: ShortcutId) => {
     if (shortcutRecording !== id) return;
     event.preventDefault();
@@ -1289,6 +1421,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
       .filter((definition) => definition.scope === "editor")
       .map((definition) => definition.defaultChord);
 
+    /** @param event 应用级键盘事件。@returns 无。@sideEffect 根据快捷键触发操作并阻止编辑器默认组合键冲突。 */
     const handleKeyDown = (event: KeyboardEvent) => {
       if (settingsOpen || updateOpen || installingUpdateRef.current) return;
       const chord = chordFromKeyboardEvent(event);
@@ -1332,16 +1465,19 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [changeViewMode, documentFullscreen, enterDocumentFullscreen, saveCurrentFile, settingsOpen, shortcutBindings, toggleActiveFileFavorite, updateOpen, viewMode]);
 
+  /** @param width 候选侧栏宽度，单位 CSS 像素。@returns 限制在工作区可用范围内的宽度。 */
   const clampSidebarWidth = useCallback((width: number) => {
     const availableWidth = Math.min(MAX_SIDEBAR_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH);
     return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), Math.max(MIN_SIDEBAR_WIDTH, availableWidth));
   }, []);
 
+  /** @returns 无。@sideEffect 结束侧栏拖拽并清除全局鼠标状态。 */
   const stopSidebarResize = useCallback(() => {
     sidebarResizingRef.current = false;
     setSidebarResizing(false);
   }, []);
 
+  /** @param event 侧栏分隔条指针按下事件。@returns 无。@sideEffect 捕获指针并开启调整状态。 */
   const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1349,11 +1485,13 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     setSidebarResizing(true);
   };
 
+  /** @param event 侧栏分隔条指针移动事件。@returns 无。@sideEffect 拖拽中按指针坐标更新侧栏宽度。 */
   const handleSidebarResizeMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!sidebarResizingRef.current) return;
     setSidebarWidth(clampSidebarWidth(event.clientX));
   };
 
+  /** @param event 侧栏分隔条指针结束事件。@returns 无。@sideEffect 释放指针并停止拖拽。 */
   const handleSidebarResizeEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1361,6 +1499,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     stopSidebarResize();
   };
 
+  /** @param event 分隔条键盘事件。@returns 无。@sideEffect 方向键以 10px 步长调整宽度。 */
   const handleSidebarResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
@@ -1368,11 +1507,13 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     setSidebarWidth((width) => clampSidebarWidth(width + direction));
   };
 
+  /** @param event 标题栏鼠标按下事件。@returns 无。@sideEffect 主键按下时请求 Tauri 开始拖动窗口。 */
   const handleTitlebarMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (event.buttons !== 1) return;
     void getCurrentWindow().startDragging();
   };
 
+  /** 关闭桌面窗口前确认不存在未完成的 SQLite 写入，避免进程退出截断配置保存。 */
   const closeWindow = useCallback(async () => {
     if (hasPendingSettingsWrite()) {
       setError("配置正在保存，请稍候再关闭应用。");
@@ -1385,6 +1526,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, []);
 
+  /** @param event 页签列表滚轮事件。@returns 无。@sideEffect 有横向溢出时将滚轮转换为受限的横向滚动。 */
   const handleTabListWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     const tabList = event.currentTarget;
     if (tabList.scrollWidth <= tabList.clientWidth) return;
@@ -2290,14 +2432,21 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   );
 }
 
+/** 空工作区引导组件的展示内容与可选操作。 */
 type EmptyStateProps = {
+  /** 空状态展示的图标节点。 */
   icon: React.ReactNode;
+  /** 空状态主标题。 */
   title: string;
+  /** 空状态说明文本。 */
   description: string;
+  /** 可选操作按钮文案；缺失时不渲染按钮。 */
   action?: string;
+  /** 可选操作回调；仅在 `action` 存在时使用。 */
   onAction?: () => void;
 };
 
+/** @param props 空状态图标、文本及可选操作。@returns 空状态 React 元素。 */
 function EmptyState({ icon, title, description, action, onAction }: EmptyStateProps) {
   return (
     <div className="empty-state">
@@ -2309,20 +2458,33 @@ function EmptyState({ icon, title, description, action, onAction }: EmptyStatePr
   );
 }
 
+/** 单个目录树节点渲染与文件操作回调。 */
 type TreeNodeProps = {
+  /** 当前渲染的树节点。 */
   node: FileTreeNode;
+  /** 节点层级，用于计算缩进。 */
   depth: number;
+  /** 当前活动文件路径；无活动文件时为 `null`。 */
   activePath: string | null;
+  /** 正在重命名的路径；无重命名时为 `null`。 */
   renamingPath: string | null;
+  /** 正在新建的条目上下文；无新建时为 `null`。 */
   creatingEntry: CreatingEntry | null;
+  /** 打开文件节点的回调。 */
   onOpen: (node: FileTreeNode) => void;
+  /** 显示节点右键菜单的回调。 */
   onContextMenu: (event: React.MouseEvent, node: FileTreeNode) => void;
+  /** 提交重命名并以布尔值报告成功的异步回调。 */
   onRename: (node: FileTreeNode, name: string) => Promise<boolean>;
+  /** 创建子条目并以布尔值报告成功的异步回调。 */
   onCreateEntry: (parentPath: string, kind: CreateEntryKind, name: string) => Promise<boolean>;
+  /** 取消当前重命名。 */
   onCancelRename: () => void;
+  /** 取消当前新建操作。 */
   onCancelCreate: () => void;
 };
 
+/** @param props 节点、展开层级和树操作回调。@returns 目录 `<details>` 或文件按钮。@sideEffect 管理节点展开与重命名输入状态。 */
 function TreeNode({
   node,
   depth,
@@ -2464,13 +2626,19 @@ function TreeNode({
   );
 }
 
+/** 目录树中新建文件或目录输入框的参数。 */
 type CreateEntryInputProps = {
+  /** 父目录层级，用于计算输入框缩进。 */
   depth: number;
+  /** 新建文件或目录。 */
   kind: CreateEntryKind;
+  /** 提交名称并以布尔值报告成功的异步回调。 */
   onCreate: (name: string) => Promise<boolean>;
+  /** 取消新建的回调。 */
   onCancel: () => void;
 };
 
+/** @param props 父节点缩进、新建类型及提交/取消回调。@returns 新建条目输入控件。@sideEffect 管理输入焦点和防重复提交状态。 */
 function CreateEntryInput({ depth, kind, onCreate, onCancel }: CreateEntryInputProps) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -2482,6 +2650,7 @@ function CreateEntryInput({ depth, kind, onCreate, onCancel }: CreateEntryInputP
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
+  /** @returns 提交流程 Promise。@sideEffect 调用创建回调，失败时重新选中输入文本。 */
   const submit = async () => {
     const name = value.trim();
     if (!name) {
@@ -2527,13 +2696,18 @@ function CreateEntryInput({ depth, kind, onCreate, onCancel }: CreateEntryInputP
   );
 }
 
+/** 目录树节点的记忆化版本，避免编辑输入时重渲染整棵树。 */
 const MemoizedTreeNode = memo(TreeNode);
 
+/** 文档大纲组件的标题列表和选中回调。 */
 type DocumentOutlineProps = {
+  /** 当前文档解析得到的标题列表。 */
   headings: DocumentHeading[];
+  /** 选择标题索引时的滚动回调。 */
   onSelect: (index: number) => void;
 };
 
+/** @param props 文档标题及滚动回调。@returns 记忆化大纲侧栏。 */
 const DocumentOutline = memo(function DocumentOutline({ headings, onSelect }: DocumentOutlineProps) {
   return (
     <aside className="document-outline" aria-label="当前文档目录">
@@ -2558,12 +2732,17 @@ const DocumentOutline = memo(function DocumentOutline({ headings, onSelect }: Do
   );
 });
 
+/** Markdown 独立预览需要的内容及工作区路径上下文。 */
 type MarkdownPreviewProps = {
+  /** 待渲染的 Markdown 文本。 */
   content: string;
+  /** 当前工作区根目录，用于读取相对图片。 */
   workspaceRoot: string;
+  /** 当前 Markdown 文档绝对路径，用于解析相对图片路径。 */
   documentPath: string;
 };
 
+/** @param props Markdown 内容和资源解析上下文。@returns 记忆化 Markdown 预览。 */
 const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, documentPath }: MarkdownPreviewProps) {
   const codeBlockTitles = extractCodeBlockTitles(content);
   let codeBlockIndex = 0;
@@ -2623,6 +2802,7 @@ const MarkdownPreview = memo(function MarkdownPreview({ content, workspaceRoot, 
   );
 });
 
+/** @param props 代码语言、标题、源码和默认 Markdown 子节点。@returns 带换行与复制工具栏的代码块。@sideEffect 复制时写系统剪贴板。 */
 function CodeBlockPreview({
   language,
   title,
@@ -2637,6 +2817,7 @@ function CodeBlockPreview({
   const [wrap, setWrap] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  /** @returns 复制流程 Promise。@sideEffect 写剪贴板并在 1200ms 内显示已复制提示。 */
   const copyCode = async () => {
     await writeText(source);
     setCopied(true);
@@ -2660,6 +2841,7 @@ function CodeBlockPreview({
   );
 }
 
+/** @param props Markdown 图片源、替代文本和资源解析上下文。@returns 已解析图片或加载提示。@sideEffect 异步创建并在卸载时释放 Blob URL。 */
 function WorkspaceMarkdownImage({ source, alt, workspaceRoot, documentPath }: {
   source?: string;
   alt: string;
@@ -2687,6 +2869,7 @@ function WorkspaceMarkdownImage({ source, alt, workspaceRoot, documentPath }: {
     : <span className="markdown-image-loading">图片加载中…</span>;
 }
 
+/** @param markdown 待解析 Markdown 文本。@returns 排除代码围栏、包含 ATX/Setext 标题的大纲列表。 */
 function extractDocumentHeadings(markdown: string): DocumentHeading[] {
   const headings: DocumentHeading[] = [];
   const lines = markdown.split(/\r?\n/);
@@ -2733,6 +2916,7 @@ function extractDocumentHeadings(markdown: string): DocumentHeading[] {
   return headings;
 }
 
+/** @param text 原始 Markdown 标题文本。@returns 去除链接、图片、HTML 与行内标记后的展示标题；空值回退“未命名标题”。 */
 function cleanHeadingText(text: string) {
   const cleaned = text
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -2744,9 +2928,11 @@ function cleanHeadingText(text: string) {
   return cleaned || "未命名标题";
 }
 
+/** @param nodes 起始目录树节点。@param normalizedQuery 已小写化搜索词。@returns 文件名包含搜索词的 Markdown 节点。 */
 function collectMatchingMarkdownDocuments(nodes: FileTreeNode[], normalizedQuery: string) {
   const matches: FileTreeNode[] = [];
 
+  /** @param entries 当前层目录节点。@returns 无。@sideEffect 将匹配节点累积到外层数组。 */
   const collectMatches = (entries: FileTreeNode[]) => {
     for (const entry of entries) {
       if (entry.isDir) {
@@ -2761,6 +2947,7 @@ function collectMatchingMarkdownDocuments(nodes: FileTreeNode[], normalizedQuery
   return matches;
 }
 
+/** @param timestamp Unix 毫秒时间戳。@returns 相对于当前时间的中文展示文本。 */
 function formatRecentEditedTime(timestamp: number) {
   const date = new Date(timestamp);
   const now = new Date();
@@ -2778,26 +2965,31 @@ function formatRecentEditedTime(timestamp: number) {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+/** @param left 第一个本地日期。@param right 第二个本地日期。@returns 年月日均相同则为 `true`。 */
 function isSameCalendarDay(left: Date, right: Date) {
   return left.getFullYear() === right.getFullYear()
     && left.getMonth() === right.getMonth()
     && left.getDate() === right.getDate();
 }
 
+/** @param path 任意 Windows 或 POSIX 路径。@returns 最后一个路径段，无法分割时返回原字符串。 */
 function pathFileName(path: string) {
   return path.replace(/\\/g, "/").split("/").pop() ?? path;
 }
 
+/** @param path 待判断绝对路径。@param directoryPath 目录绝对路径。@returns 路径等于目录或属于其后代时为 `true`。 */
 function isPathInsideDirectory(path: string, directoryPath: string) {
   return path === directoryPath
     || path.startsWith(`${directoryPath}/`)
     || path.startsWith(`${directoryPath}\\`);
 }
 
+/** @param path 受影响路径。@param oldDirectoryPath 原目录前缀。@param newDirectoryPath 新目录前缀。@returns 替换前缀后的路径。 */
 function replaceDirectoryPath(path: string, oldDirectoryPath: string, newDirectoryPath: string) {
   return `${newDirectoryPath}${path.slice(oldDirectoryPath.length)}`;
 }
 
+/** @param root 工作区根路径。@param path 文件绝对路径。@param fallbackName 非工作区路径时的显示名。@returns 统一 `/` 分隔的相对路径或回退名称。 */
 function workspaceRelativePath(root: string, path: string, fallbackName: string) {
   const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
   const normalizedPath = path.replace(/\\/g, "/");
@@ -2805,6 +2997,7 @@ function workspaceRelativePath(root: string, path: string, fallbackName: string)
   return normalizedPath.startsWith(prefix) ? normalizedPath.slice(prefix.length) : fallbackName;
 }
 
+/** @param content Markdown 文本。@returns 行数、词数与 Unicode 字符数统计对象。 */
 function getDocumentStatistics(content: string) {
   return {
     lineCount: content === "" ? 1 : content.split(/\r\n|\r|\n/).length,

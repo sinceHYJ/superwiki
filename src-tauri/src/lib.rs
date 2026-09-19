@@ -1,3 +1,6 @@
+//! Tauri 本地文件服务与命令注册：负责工作区文件访问及设置模块的 IPC 转发。
+//! 所有路径读写必须经过本文件的边界校验；设置数据由 `settings` 模块持久化到 SQLite。
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -8,67 +11,102 @@ use std::{
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
+/// SQLite 设置服务；仅通过下方异步命令暴露给前端。
 mod settings;
 
+/// 工作区树中的文件或目录节点，序列化为前端使用的 camelCase 字段。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FileTreeNode {
+    /// 节点展示名称。
     name: String,
+    /// 节点规范化后的绝对路径。
     path: String,
+    /// 是否为目录；目录节点才拥有 `children`。
     is_dir: bool,
+    /// 是否为可编辑的 Markdown 文件。
     is_markdown: bool,
+    /// 是否为只读预览的图片文件。
     is_image: bool,
+    /// 是否为 Office 预览文件。
     is_office: bool,
+    /// 已排序的直接子节点；普通文件为空数组。
     children: Vec<FileTreeNode>,
 }
 
+/// 用户打开的工作区及其顶层目录树。
 #[derive(Serialize)]
 pub(crate) struct WorkspaceTree {
+    /// 工作区根目录规范化后的绝对路径。
     root: String,
+    /// 工作区根目录展示名称。
     name: String,
+    /// 根目录直接子节点，目录优先且按名称排序。
     children: Vec<FileTreeNode>,
 }
 
+/// 上传资源的元数据，描述目标工作区、关联 Markdown 文档和原始文件名。
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AssetUploadMetadata {
+    /// 工作区根目录绝对路径。
     root: String,
+    /// 上传资源关联的 Markdown 文档绝对路径。
     document_path: String,
+    /// 客户端原始文件名，保存前会净化。
     file_name: String,
 }
 
+/// 写入 SQLite 前已规范化的 OSS 非敏感配置。
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OssSyncConfig {
+    /// OSS 区域标识。
     region: String,
+    /// HTTP(S) Endpoint。
     endpoint: String,
+    /// 目标 Bucket。
     bucket: String,
+    /// Bucket 对象前缀；空字符串表示根目录。
     prefix: String,
+    /// AccessKey ID，密钥不在此结构中保存。
     access_key_id: String,
     #[serde(default)]
+    /// 是否启用自动同步；缺失旧字段默认关闭。
     enabled: bool,
 }
 
+/// 打开工作区命令一次返回的数据库记录、目录树和文档偏好。
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenWorkspaceResult {
+    /// 用于后续偏好操作的持久化工作区记录。
     workspace: settings::WorkspaceRecord,
+    /// 当前文件系统扫描得到的工作区目录树。
     tree: WorkspaceTree,
+    /// 收藏和最近编辑文档快照。
     preferences: settings::WorkspacePreferences,
 }
 
+/// Bilibili 视频信息 API 的最小响应字段。
 #[derive(Deserialize)]
 struct BilibiliViewResponse {
+    /// API 业务状态码，零表示成功。
     code: i32,
+    /// 成功时的视频元数据；失败时可能缺失。
     data: Option<BilibiliVideoData>,
 }
 
+/// Bilibili 视频元数据中本应用需要的封面字段。
 #[derive(Deserialize)]
 struct BilibiliVideoData {
+    /// 封面 URL；API 未提供时为 `None`。
     pic: Option<String>,
 }
 
 #[tauri::command]
+/// 下载并返回 Bilibili 视频封面二进制。
+/// 参数：`bvid` 必须是 12 字符、以 `BV` 开头的字母数字编号。返回：图片 IPC 响应。错误/副作用：编号、远端 API 或下载失败时返回错误；会发起网络请求。
 async fn fetch_bilibili_thumbnail(bvid: String) -> Result<tauri::ipc::Response, String> {
     if !bvid.starts_with("BV")
         || bvid.len() != 12
@@ -121,6 +159,8 @@ async fn fetch_bilibili_thumbnail(bvid: String) -> Result<tauri::ipc::Response, 
     Ok(tauri::ipc::Response::new(image.to_vec()))
 }
 
+/// 判断路径是否具有允许编辑的 Markdown 扩展名。
+/// 参数：`path` 为任意文件路径。返回：`.md`/`.markdown`（忽略大小写）时为 `true`。
 fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -129,6 +169,8 @@ fn is_markdown(path: &Path) -> bool {
         })
 }
 
+/// 判断路径是否为支持只读预览的图片。
+/// 参数：`path` 为任意文件路径。返回：支持的图片扩展名时为 `true`。
 fn is_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -140,6 +182,8 @@ fn is_image(path: &Path) -> bool {
         })
 }
 
+/// 判断路径是否具有可读取 HTML 资源的扩展名。
+/// 参数：`path` 为任意文件路径。返回：`.html`/`.htm`（忽略大小写）时为 `true`。
 fn is_html(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -148,6 +192,8 @@ fn is_html(path: &Path) -> bool {
         })
 }
 
+/// 判断路径是否为支持预览的 Office 文件。
+/// 参数：`path` 为任意文件路径。返回：DOCX、XLSX 或 PPTX 时为 `true`。
 fn is_office(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -159,6 +205,8 @@ fn is_office(path: &Path) -> bool {
         })
 }
 
+/// 递归扫描目录并生成按目录优先、名称排序的文件树。
+/// 参数：`path` 必须为可读取目录。返回：其直接节点及递归子节点。错误/副作用：读取失败时返回错误。
 fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
     let mut nodes = Vec::new();
     let entries = fs::read_dir(path).map_err(|error| error.to_string())?;
@@ -194,6 +242,8 @@ fn scan_directory(path: &Path) -> Result<Vec<FileTreeNode>, String> {
     Ok(nodes)
 }
 
+/// 规范化并验证工作区内的文件或目录路径。
+/// 参数：`root` 为工作区根目录，`path` 为目标路径。返回：规范化目标路径。错误：越界、根无效或目标非条目时返回错误。
 fn workspace_entry_path(root: &str, path: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
@@ -204,6 +254,8 @@ fn workspace_entry_path(root: &str, path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 验证工作区内的普通文件路径。
+/// 参数：`root` 为工作区根目录，`path` 为目标路径。返回：规范化普通文件路径。错误：目录或越界条目被拒绝。
 fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
     let path = workspace_entry_path(root, path)?;
     if !path.is_file() {
@@ -212,6 +264,8 @@ fn workspace_file_path(root: &str, path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 规范化 OSS 对象前缀并禁止向上目录组件。
+/// 参数：`prefix` 为用户输入前缀。返回：去首尾斜杠并统一为 `/` 的前缀。错误：包含 `..` 时返回错误。
 fn normalize_oss_prefix(prefix: &str) -> Result<String, String> {
     let prefix = prefix.trim().trim_matches('/').replace('\\', "/");
     if prefix.split('/').any(|part| part == "..") {
@@ -220,6 +274,8 @@ fn normalize_oss_prefix(prefix: &str) -> Result<String, String> {
     Ok(prefix)
 }
 
+/// 规范化 OSS Endpoint 为 HTTP(S) URL。
+/// 参数：`endpoint` 为用户输入。返回：无协议时自动添加 `https://` 的 URL。错误：为空或协议非 HTTP(S) 时返回错误。
 fn normalize_oss_endpoint(endpoint: &str) -> Result<String, String> {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.is_empty() {
@@ -234,6 +290,8 @@ fn normalize_oss_endpoint(endpoint: &str) -> Result<String, String> {
     Ok(format!("https://{endpoint}"))
 }
 
+/// 校验 OSS 同步所需的必填配置。
+/// 参数：`config` 为已规范化 OSS 配置。返回：字段齐全时为 `()`。错误：区域、Endpoint、Bucket 或 AccessKey ID 为空时返回错误。
 fn validate_oss_sync_config(config: &OssSyncConfig) -> Result<(), String> {
     if config.region.trim().is_empty()
         || config.endpoint.trim().is_empty()
@@ -245,6 +303,8 @@ fn validate_oss_sync_config(config: &OssSyncConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// 验证工作区内非根目录的目录路径。
+/// 参数：`root` 为工作区根目录，`path` 为目标路径。返回：规范化目录路径。错误：根目录、文件或越界路径被拒绝。
 fn workspace_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
@@ -255,6 +315,8 @@ fn workspace_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 验证可作为新建条目父级的工作区目录路径。
+/// 参数：`root` 为工作区根目录，`path` 为父目录。返回：规范化目录路径。错误：越界或非目录时返回错误。
 fn workspace_parent_directory_path(root: &str, path: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let path = fs::canonicalize(path).map_err(|error| error.to_string())?;
@@ -265,6 +327,8 @@ fn workspace_parent_directory_path(root: &str, path: &str) -> Result<PathBuf, St
     Ok(path)
 }
 
+/// 校验新建或重命名的单个文件名。
+/// 参数：`name` 为用户输入名称。返回：合法时为 `()`。错误：空、`.`、`..` 或包含路径分隔符时返回错误。
 fn validate_entry_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
         return Err("名称无效".into());
@@ -273,11 +337,16 @@ fn validate_entry_name(name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
+/// 列出工作区目录树。
+/// 参数：`root` 为工作区目录。返回：规范化根及递归文件树。错误：根无效或扫描失败时返回错误。
 fn list_workspace(root: String) -> Result<WorkspaceTree, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     build_workspace_tree(&root)
 }
 
+/// 基于已规范化的目录根构建工作区树。
+///
+/// 参数：`root` 必须是已规范化目录。返回：其 `WorkspaceTree`。错误：扫描失败或不是目录时返回错误。
 fn build_workspace_tree(root: &Path) -> Result<WorkspaceTree, String> {
     if !root.is_dir() {
         return Err("选择的路径不是文件夹".into());
@@ -294,6 +363,8 @@ fn build_workspace_tree(root: &Path) -> Result<WorkspaceTree, String> {
 }
 
 #[tauri::command]
+/// 重命名工作区中的非根目录。
+/// 参数：`root` 为工作区根，`path` 为原目录，`new_name` 为不含分隔符的新名称。返回：新绝对路径。错误/副作用：校验或重命名失败时返回错误；成功时修改文件系统。
 fn rename_workspace_directory(
     root: String,
     path: String,
@@ -321,6 +392,8 @@ fn rename_workspace_directory(
 }
 
 #[tauri::command]
+/// 重命名工作区中的文件，并保留其受支持的扩展名类别。
+/// 参数：`root` 为工作区根，`path` 为原文件，`new_name` 为新名称。返回：新绝对路径。错误/副作用：无效类型、冲突或重命名失败时返回错误；成功时修改文件系统。
 fn rename_workspace_file(root: String, path: String, new_name: String) -> Result<String, String> {
     validate_entry_name(&new_name)?;
     let path = workspace_file_path(&root, &path)?;
@@ -353,18 +426,24 @@ fn rename_workspace_file(root: String, path: String, new_name: String) -> Result
 }
 
 #[tauri::command]
+/// 永久删除工作区内非根目录及其后代。
+/// 参数：`root` 为工作区根，`path` 为目录。返回：成功时为 `()`。错误/副作用：校验或删除失败时返回错误；成功时递归删除文件系统内容。
 fn delete_workspace_directory(root: String, path: String) -> Result<(), String> {
     let path = workspace_directory_path(&root, &path)?;
     fs::remove_dir_all(path).map_err(|error| format!("无法删除文件夹：{error}"))
 }
 
 #[tauri::command]
+/// 永久删除工作区内文件。
+/// 参数：`root` 为工作区根，`path` 为文件。返回：成功时为 `()`。错误/副作用：校验或删除失败时返回错误；成功时删除文件。
 fn delete_workspace_file(root: String, path: String) -> Result<(), String> {
     let path = workspace_file_path(&root, &path)?;
     fs::remove_file(path).map_err(|error| format!("无法删除文件：{error}"))
 }
 
 #[tauri::command]
+/// 在工作区目录中新建子目录。
+/// 参数：`root` 为工作区根，`parent_path` 为父目录，`name` 为合法单段名称。返回：新目录绝对路径。错误/副作用：冲突或创建失败时返回错误；成功时创建目录。
 fn create_workspace_directory(
     root: String,
     parent_path: String,
@@ -384,6 +463,8 @@ fn create_workspace_directory(
 }
 
 #[tauri::command]
+/// 在工作区目录中新建空 Markdown 文件。
+/// 参数：`root` 为工作区根，`parent_path` 为父目录，`name` 为名称或 Markdown 文件名。返回：新文件绝对路径。错误/副作用：冲突、扩展名无效或创建失败时返回错误；成功时创建文件。
 fn create_workspace_markdown_file(
     root: String,
     parent_path: String,
@@ -415,6 +496,8 @@ fn create_workspace_markdown_file(
 }
 
 #[tauri::command]
+/// 读取工作区内 Markdown 文本。
+/// 参数：`root` 为工作区根，`path` 为 Markdown 文件。返回：UTF-8 文件内容。错误：越界、非 Markdown 或读取失败时返回错误。
 fn read_workspace_file(root: String, path: String) -> Result<String, String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_markdown(&path) {
@@ -424,6 +507,8 @@ fn read_workspace_file(root: String, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+/// 读取工作区文件的原始二进制内容以供同步。
+/// 参数：`root` 为工作区根，`path` 为文件。返回：IPC 二进制响应。错误：越界或读取失败时返回错误。
 fn read_workspace_sync_file(root: String, path: String) -> Result<tauri::ipc::Response, String> {
     let path = workspace_file_path(&root, &path)?;
     fs::read(path)
@@ -431,6 +516,9 @@ fn read_workspace_sync_file(root: String, path: String) -> Result<tauri::ipc::Re
         .map_err(|error| format!("无法读取同步文件：{error}"))
 }
 
+/// 初始化 SQLite 设置数据库并返回应用启动快照。
+///
+/// 参数：`app` 为 Tauri 应用句柄。返回：`BootstrapSettings` 启动快照。错误/副作用：初始化失败时返回错误；同步数据库工作移至阻塞线程。
 #[tauri::command]
 async fn initialize_settings(app: tauri::AppHandle) -> Result<settings::BootstrapSettings, String> {
     tauri::async_runtime::spawn_blocking(move || settings::initialize(&app))
@@ -438,6 +526,9 @@ async fn initialize_settings(app: tauri::AppHandle) -> Result<settings::Bootstra
         .map_err(|error| format!("配置初始化任务失败：{error}"))?
 }
 
+/// 校验并保存单项应用偏好。
+///
+/// 参数：`app` 为应用句柄，`change` 为键值更新。返回：成功时为 `()`。错误/副作用：白名单或写入失败时返回错误；数据库写入在阻塞线程执行。
 #[tauri::command]
 async fn update_app_preference(
     app: tauri::AppHandle,
@@ -448,6 +539,9 @@ async fn update_app_preference(
         .map_err(|error| format!("配置保存任务失败：{error}"))?
 }
 
+/// 原子保存所有非默认快捷键覆盖。
+///
+/// 参数：`app` 为应用句柄，`overrides` 为动作 ID 到组合键映射。返回：成功时为 `()`。错误/副作用：无效数据或写入失败时返回错误；在阻塞线程替换快照。
 #[tauri::command]
 async fn save_shortcut_overrides(
     app: tauri::AppHandle,
@@ -458,12 +552,16 @@ async fn save_shortcut_overrides(
         .map_err(|error| format!("快捷键保存任务失败：{error}"))?
 }
 
+/// 打开工作区、登记其持久化记录并读取关联偏好。
+///
+/// 参数：`app` 为应用句柄，`root` 为用户选择目录。返回：目录树、工作区 ID 与偏好。错误/副作用：路径或数据库失败时返回错误；在阻塞线程规范化并登记工作区。
 #[tauri::command]
 async fn open_workspace(
     app: tauri::AppHandle,
     root: String,
 ) -> Result<OpenWorkspaceResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        // 使用规范化路径作为数据库唯一键，避免同一目录因符号链接或相对路径重复登记。
         let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
         let tree = build_workspace_tree(&root)?;
         let (workspace, preferences) = settings::open_workspace(&app, &root)?;
@@ -477,6 +575,8 @@ async fn open_workspace(
     .map_err(|error| format!("工作区打开任务失败：{error}"))?
 }
 
+/// 清除最近打开工作区标记，不删除历史工作区与其文档偏好。
+/// 参数：`app` 为应用句柄。返回：成功时为 `()`。错误/副作用：写入失败时返回错误；在阻塞线程更新数据库。
 #[tauri::command]
 async fn close_workspace(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || settings::close_workspace(&app))
@@ -484,6 +584,9 @@ async fn close_workspace(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|error| format!("工作区配置保存任务失败：{error}"))?
 }
 
+/// 设置 Markdown 文档的收藏状态并返回更新后的工作区偏好。
+///
+/// 参数：`app` 为应用句柄，`workspace_id` 标识工作区，`path` 为文档，`favorite` 决定添加或移除。返回：更新后的偏好。错误/副作用：路径或写入失败时返回错误；在阻塞线程更新收藏。
 #[tauri::command]
 async fn set_document_favorite(
     app: tauri::AppHandle,
@@ -498,6 +601,8 @@ async fn set_document_favorite(
     .map_err(|error| format!("收藏保存任务失败：{error}"))?
 }
 
+/// 写入一条最近编辑记录并返回按上限裁剪后的工作区偏好。
+/// 参数：`app` 为应用句柄，`workspace_id` 标识工作区，`path` 为文档。返回：更新后的偏好。错误/副作用：路径或写入失败时返回错误；在阻塞线程写入记录。
 #[tauri::command]
 async fn record_recent_edit(
     app: tauri::AppHandle,
@@ -509,6 +614,9 @@ async fn record_recent_edit(
         .map_err(|error| format!("最近编辑保存任务失败：{error}"))?
 }
 
+/// 在文件或目录重命名后迁移其收藏和最近编辑路径。
+///
+/// 参数：`app` 为应用句柄，`workspace_id` 标识工作区，`old_path`/`new_path` 为迁移路径。返回：更新后的偏好。错误/副作用：路径或写入失败时返回错误；冲突保留较新时间戳。
 #[tauri::command]
 async fn remap_workspace_documents(
     app: tauri::AppHandle,
@@ -523,6 +631,8 @@ async fn remap_workspace_documents(
     .map_err(|error| format!("文档配置更新任务失败：{error}"))?
 }
 
+/// 在文件或目录删除后清理其本身及后代的文档偏好记录。
+/// 参数：`app` 为应用句柄，`workspace_id` 标识工作区，`path` 为删除路径。返回：更新后的偏好。错误/副作用：路径或写入失败时返回错误；在阻塞线程清理后代记录。
 #[tauri::command]
 async fn remove_workspace_documents(
     app: tauri::AppHandle,
@@ -536,6 +646,8 @@ async fn remove_workspace_documents(
     .map_err(|error| format!("文档配置清理任务失败：{error}"))?
 }
 
+/// 读取可回显到前端的脱敏 OSS 配置。
+/// 参数：`app` 为应用句柄。返回：不含密钥的配置或 `None`。错误：读取失败时返回错误。
 #[tauri::command]
 async fn load_oss_sync_settings(
     app: tauri::AppHandle,
@@ -545,6 +657,9 @@ async fn load_oss_sync_settings(
         .map_err(|error| format!("OSS 配置读取任务失败：{error}"))?
 }
 
+/// 规范化并校验前端 OSS 输入后保存到 SQLite。
+///
+/// 参数：`app` 为应用句柄，`settings` 为前端 OSS 输入。返回：成功时为 `()`。错误/副作用：规范化或写入失败时返回错误；空密钥保留已有密钥并在阻塞线程写入。
 #[tauri::command]
 async fn save_oss_sync_settings(
     app: tauri::AppHandle,
@@ -559,6 +674,7 @@ async fn save_oss_sync_settings(
         enabled: settings.enabled,
     };
     validate_oss_sync_config(&config)?;
+    // 仅将经过 endpoint、prefix 与必填字段校验的值交给持久化模块。
     let normalized = settings::OssSyncSettingsInput {
         region: config.region,
         endpoint: config.endpoint,
@@ -575,6 +691,8 @@ async fn save_oss_sync_settings(
     .map_err(|error| format!("OSS 配置保存任务失败：{error}"))?
 }
 
+/// 读取同步任务使用的完整 OSS 凭据；调用方不得向前端回传 AccessKey Secret。
+/// 参数：`app` 为应用句柄。返回：仅 Rust 内部使用的完整凭据。错误：读取失败时返回错误。
 #[tauri::command]
 async fn load_oss_sync_credentials(
     app: tauri::AppHandle,
@@ -585,6 +703,8 @@ async fn load_oss_sync_credentials(
 }
 
 #[tauri::command]
+/// 保存工作区内 Markdown 文件。
+/// 参数：`root` 为工作区根，`path` 为 Markdown 文件，`content` 为完整 Markdown 文本。返回：成功时为 `()`。错误/副作用：越界、类型或写入失败时返回错误；成功时覆盖文件内容。
 fn save_workspace_file(root: String, path: String, content: String) -> Result<(), String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_markdown(&path) {
@@ -593,6 +713,8 @@ fn save_workspace_file(root: String, path: String, content: String) -> Result<()
     fs::write(path, content).map_err(|error| format!("无法保存文件：{error}"))
 }
 
+/// 将上传图片名收敛为安全的单段文件名。
+/// 参数：`file_name` 为客户端原始文件名。返回：保留支持扩展名、仅含安全字符的文件名。错误：无名称或不支持图片类型时返回错误。
 fn sanitize_image_name(file_name: &str) -> Result<String, String> {
     let base_name = file_name
         .rsplit(['/', '\\'])
@@ -635,6 +757,8 @@ fn sanitize_image_name(file_name: &str) -> Result<String, String> {
     ))
 }
 
+/// 在资源目录中创建不冲突文件并写入字节。
+/// 参数：`assets_dir` 为已验证目录，`file_name` 为安全名称，`bytes` 为文件内容。返回：新文件路径。错误/副作用：创建或写入失败时返回错误；成功时写入文件。
 fn unique_asset_path(assets_dir: &Path, file_name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
     let path = Path::new(file_name);
     let stem = path
@@ -672,6 +796,8 @@ fn unique_asset_path(assets_dir: &Path, file_name: &str, bytes: &[u8]) -> Result
     unreachable!()
 }
 
+/// 保存 Markdown 同级 `assets/` 中的上传图片。
+/// 参数：`metadata` 描述工作区、文档和原文件名，`bytes` 为非空图片数据。返回：插入 Markdown 的相对资源路径。错误/副作用：路径/类型/写入失败时返回错误；成功时创建资源文件。
 fn save_uploaded_image(metadata: AssetUploadMetadata, bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("图片内容为空".into());
@@ -702,6 +828,8 @@ fn save_uploaded_image(metadata: AssetUploadMetadata, bytes: &[u8]) -> Result<St
     Ok(format!("assets/{saved_name}"))
 }
 
+/// 将上传 HTML 名收敛为安全的单段文件名。
+/// 参数：`file_name` 为客户端原始文件名。返回：保留 `.html`/`.htm`、仅含安全字符的文件名。错误：无名称或扩展名不支持时返回错误。
 fn sanitize_html_name(file_name: &str) -> Result<String, String> {
     let base_name = file_name
         .rsplit(['/', '\\'])
@@ -744,6 +872,8 @@ fn sanitize_html_name(file_name: &str) -> Result<String, String> {
     ))
 }
 
+/// 保存 Markdown 同级 `assets/` 中的上传 HTML 资源。
+/// 参数：`metadata` 描述目标文档，`bytes` 为非空 UTF-8 HTML 数据。返回：插入 Markdown 的相对资源路径。错误/副作用：UTF-8、路径、类型或写入失败时返回错误；成功时创建资源文件。
 fn save_uploaded_html(metadata: AssetUploadMetadata, bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("HTML 文件内容为空".into());
@@ -777,6 +907,8 @@ fn save_uploaded_html(metadata: AssetUploadMetadata, bytes: &[u8]) -> Result<Str
     Ok(format!("assets/{saved_name}"))
 }
 
+/// 解析 IPC 二进制上传负载的长度前缀元数据和正文。
+/// 参数：`body` 为四字节大端 JSON 长度前缀加原始文件字节。返回：元数据及正文切片。错误：长度或 JSON 无效时返回错误。
 fn parse_upload_payload(body: &[u8]) -> Result<(AssetUploadMetadata, &[u8]), String> {
     if body.len() < 4 {
         return Err("图片上传请求无效".into());
@@ -792,6 +924,8 @@ fn parse_upload_payload(body: &[u8]) -> Result<(AssetUploadMetadata, &[u8]), Str
 }
 
 #[tauri::command]
+/// 接收二进制 IPC 图片上传并保存到当前 Markdown 的资源目录。
+/// 参数：`request` 必须含 Raw 二进制负载。返回：相对资源路径。错误/副作用：负载或保存失败时返回错误；成功时创建图片文件。
 fn upload_workspace_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
         return Err("图片上传请求必须使用二进制数据".into());
@@ -801,6 +935,8 @@ fn upload_workspace_image(request: tauri::ipc::Request<'_>) -> Result<String, St
 }
 
 #[tauri::command]
+/// 接收二进制 IPC HTML 上传并保存到当前 Markdown 的资源目录。
+/// 参数：`request` 必须含 Raw 二进制负载。返回：相对资源路径。错误/副作用：负载或保存失败时返回错误；成功时创建 HTML 文件。
 fn upload_workspace_html(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
         return Err("HTML 上传请求必须使用二进制数据".into());
@@ -810,6 +946,8 @@ fn upload_workspace_html(request: tauri::ipc::Request<'_>) -> Result<String, Str
 }
 
 #[tauri::command]
+/// 读取工作区内 HTML 文本。
+/// 参数：`root` 为工作区根，`path` 为 HTML 文件。返回：UTF-8 HTML 文本。错误：越界、非 HTML 或读取失败时返回错误。
 fn read_workspace_html(root: String, path: String) -> Result<String, String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_html(&path) {
@@ -819,6 +957,8 @@ fn read_workspace_html(root: String, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+/// 读取工作区内支持图片的原始字节。
+/// 参数：`root` 为工作区根，`path` 为图片文件。返回：IPC 二进制响应。错误：越界、类型或读取失败时返回错误。
 fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Response, String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_image(&path) {
@@ -830,6 +970,8 @@ fn read_workspace_image(root: String, path: String) -> Result<tauri::ipc::Respon
 }
 
 #[tauri::command]
+/// 在系统文件管理器中打开目录或定位文件。
+/// 参数：`app` 为应用句柄，`root` 为工作区根，`path` 为工作区内条目。返回：成功时为 `()`。错误/副作用：路径或系统打开失败时返回错误；会唤起外部文件管理器。
 fn open_workspace_entry_in_file_manager(
     app: tauri::AppHandle,
     root: String,
@@ -848,6 +990,8 @@ fn open_workspace_entry_in_file_manager(
 }
 
 #[tauri::command]
+/// 读取工作区内支持的 Office 文件原始字节。
+/// 参数：`root` 为工作区根，`path` 为 Office 文件。返回：IPC 二进制响应。错误：越界、类型或读取失败时返回错误。
 fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Response, String> {
     let path = workspace_file_path(&root, &path)?;
     if !is_office(&path) {
@@ -859,6 +1003,8 @@ fn read_workspace_office(root: String, path: String) -> Result<tauri::ipc::Respo
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 构建 Tauri 应用、注册本地命令并运行桌面事件循环。
+/// 返回：正常退出时为 `()`。副作用：创建桌面窗口、注册 IPC 命令并启动应用生命周期。
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
@@ -915,6 +1061,7 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    /// 验证受支持 Markdown、图片、HTML 与 Office 扩展名识别。
     #[test]
     fn recognizes_supported_file_extensions() {
         assert!(is_markdown(Path::new("README.md")));
@@ -934,6 +1081,7 @@ mod tests {
         assert!(!is_office(Path::new("document.pdf")));
     }
 
+    /// 验证 Endpoint 自动补 HTTPS、去尾斜杠并拒绝非 HTTP(S) 协议。
     #[test]
     fn normalizes_oss_endpoints() {
         assert_eq!(
@@ -947,6 +1095,7 @@ mod tests {
         assert!(normalize_oss_endpoint("ftp://example.com").is_err());
     }
 
+    /// 验证旧 OSS 配置缺失 enabled 字段时默认关闭同步。
     #[test]
     fn defaults_oss_sync_to_disabled_for_existing_configs() {
         let config: OssSyncConfig = serde_json::from_str(
@@ -956,6 +1105,7 @@ mod tests {
         assert!(!config.enabled);
     }
 
+    /// 验证 Office 读取仅接受支持的扩展名。
     #[test]
     fn reads_only_supported_office_files() {
         let unique = SystemTime::now()
@@ -982,6 +1132,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证二进制上传负载可还原 JSON 元数据与资源字节。
     #[test]
     fn parses_binary_image_upload_payload() {
         let metadata = AssetUploadMetadata {
@@ -1002,6 +1153,7 @@ mod tests {
         assert_eq!(bytes, b"image-bytes");
     }
 
+    /// 验证 HTML 资源命名、保存、读取与扩展名限制。
     #[test]
     fn uploads_and_reads_html_assets() {
         let unique = SystemTime::now()
@@ -1044,6 +1196,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证同名图片上传生成确定的递增相对资源路径。
     #[test]
     fn creates_unique_relative_image_paths() {
         let unique = SystemTime::now()
@@ -1081,6 +1234,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证可在工作区创建目录和自动补 `.md` 的 Markdown 文件。
     #[test]
     fn creates_workspace_markdown_files_and_directories() {
         let unique = SystemTime::now()
@@ -1109,6 +1263,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证新建条目拒绝越界名称、错误扩展名与重复路径。
     #[test]
     fn refuses_invalid_workspace_entries() {
         let unique = SystemTime::now()
@@ -1151,6 +1306,7 @@ mod tests {
         fs::remove_dir_all(outside).unwrap();
     }
 
+    /// 验证删除命令移除工作区内文件和目录。
     #[test]
     fn deletes_workspace_files_and_directories() {
         let unique = SystemTime::now()
@@ -1174,6 +1330,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证删除命令拒绝工作区根目录和根外条目。
     #[test]
     fn refuses_to_delete_workspace_root_or_outside_entries() {
         let unique = SystemTime::now()
@@ -1206,6 +1363,7 @@ mod tests {
         fs::remove_dir_all(outside).unwrap();
     }
 
+    /// 验证文件重命名保留内容并返回新路径。
     #[test]
     fn renames_workspace_files() {
         let unique = SystemTime::now()
@@ -1230,6 +1388,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证文件重命名拒绝越界、类型不匹配与同名冲突。
     #[test]
     fn refuses_invalid_file_renames() {
         let unique = SystemTime::now()
@@ -1257,6 +1416,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证目录重命名保留子文件并返回规范化新路径。
     #[test]
     fn renames_workspace_directory() {
         let unique = SystemTime::now()
@@ -1284,6 +1444,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证目录重命名拒绝空名称、越界、根目录与同名冲突。
     #[test]
     fn refuses_invalid_or_conflicting_directory_renames() {
         let unique = SystemTime::now()
@@ -1312,6 +1473,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// 验证通用工作区路径校验允许根内条目并拒绝根外条目。
     #[test]
     fn workspace_entries_must_stay_inside_root() {
         let unique = SystemTime::now()
