@@ -1,13 +1,11 @@
 CREATE TABLE workspaces (
     id INTEGER PRIMARY KEY CHECK(id BETWEEN 1 AND 9007199254740991),
-    path TEXT NOT NULL UNIQUE CHECK(length(path) > 0),
-    last_opened_at INTEGER NOT NULL DEFAULT 0 CHECK(last_opened_at BETWEEN 0 AND 9007199254740991)
+    path TEXT NOT NULL UNIQUE CHECK(length(path) > 0)
 ) STRICT;
 
 CREATE TABLE app_settings (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     open_tab_limit INTEGER NOT NULL DEFAULT 8 CHECK(open_tab_limit BETWEEN 1 AND 9007199254740991),
-    auto_open_last_workspace INTEGER NOT NULL DEFAULT 1 CHECK(auto_open_last_workspace IN (0, 1)),
     auto_save INTEGER NOT NULL DEFAULT 1 CHECK(auto_save IN (0, 1)),
     theme_color TEXT NOT NULL DEFAULT 'sky' CHECK(theme_color IN ('yellow', 'sky', 'mint', 'coral', 'lavender')),
     content_width TEXT NOT NULL DEFAULT 'default' CHECK(content_width IN ('default', 'full')),
@@ -50,7 +48,6 @@ CREATE TABLE recent_documents (
 
 CREATE INDEX favorite_documents_order ON favorite_documents(workspace_id, favorited_at DESC, document_path ASC);
 CREATE INDEX recent_documents_order ON recent_documents(workspace_id, edited_at DESC, document_path ASC);
-CREATE INDEX workspaces_recent_open_order ON workspaces(last_opened_at DESC, id DESC);
 
 CREATE TRIGGER workspaces_no_delete
 BEFORE DELETE ON workspaces

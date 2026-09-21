@@ -71,6 +71,7 @@ import {
 } from "./ossSync";
 import "./App.css";
 import AppUpdater from "./AppUpdater";
+import WelcomePage from "./WelcomePage";
 import { collectUpdateDocuments, createSaveQueue } from "./updateSave";
 import type { ContentWidth } from "./contentWidth";
 import {
@@ -267,6 +268,18 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const installingUpdateRef = useRef(false);
   const openingFilesRef = useRef(0);
   const [saveQueue] = useState(() => createSaveQueue((document) => invoke<void>("save_workspace_file", document)));
+  // 启动快照决定是否恢复；运行中修改设置只影响下次启动。
+  const startupWorkspace = initialSettings.preferences.autoOpenLastWorkspace
+    ? initialSettings.workspaces.find(({ id }) => id === initialSettings.preferences.lastWorkspaceId)
+    : undefined;
+  // 启动恢复只执行一次；同步锁覆盖 React 提交前的重复点击和目录选择器等待。
+  const startupRestoredRef = useRef(false);
+  const workspaceOpeningRef = useRef(false);
+  const folderDialogOpenRef = useRef(false);
+  // 历史列表从启动快照初始化，后续只使用成功打开时返回的规范化记录更新。
+  const [knownWorkspaces, setKnownWorkspaces] = useState(initialSettings.workspaces);
+  const [startupPreferenceError, setStartupPreferenceError] = useState("");
+  const [autoOpenLastWorkspace, setAutoOpenLastWorkspace] = useState(initialSettings.preferences.autoOpenLastWorkspace);
   const [workspace, setWorkspace] = useState<WorkspaceTree | null>(null);
   // 仅在工作区已通过 SQLite 登记后存在，用于收藏、最近编辑、重命名和删除记录。
   const [workspaceId, setWorkspaceId] = useState<number | null>(null);
@@ -315,7 +328,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   const [appVersion, setAppVersion] = useState("");
   const [themeColor, setThemeColor] = useState<ThemeColor>(initialSettings.preferences.themeColor);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceLoading, setWorkspaceLoading] = useState(Boolean(startupWorkspace));
   const [directoryContextMenu, setDirectoryContextMenu] = useState<DirectoryContextMenu | null>(null);
   const [pathCopiedNotice, setPathCopiedNotice] = useState(false);
   const [creatingEntry, setCreatingEntry] = useState<CreatingEntry | null>(null);
@@ -531,14 +544,27 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
     }
   }, [documentDrafts, flushPendingSave, openTabLimit, replaceImageUrl]);
 
-  /** 打开并登记工作区，同时用 Rust 返回的偏好快照替换当前快捷访问数据。 */
+  /**
+   * 打开并登记工作区，同时刷新历史列表及快捷访问数据。
+   * @param root 待打开工作区的绝对路径，由 Rust 校验并规范化。
+   * @returns 请求完成后的 Promise；重复请求直接返回，失败在界面展示。
+   * @sideEffect 扫描目录、登记工作区并更新界面状态，请求期间保持同步互斥。
+   */
   const loadWorkspace = useCallback(async (root: string) => {
+    // 同步加锁，阻止 React 更新前连续点击发起多个目录扫描。
+    if (workspaceOpeningRef.current) return;
+    workspaceOpeningRef.current = true;
     setWorkspaceLoading(true);
     try {
       setError("");
       const result = await openWorkspace(root);
       setWorkspace(result.tree);
       setWorkspaceId(result.workspace.id);
+      // 服务端已更新最近打开时间；当前会话同步把成功打开的工作区移到欢迎页列表首位。
+      setKnownWorkspaces((records) => [
+        result.workspace,
+        ...records.filter(({ id }) => id !== result.workspace.id),
+      ]);
       setRecentEditedDocuments(result.preferences.recent);
       setFavoriteDocuments(result.preferences.favorites);
     } catch (reason) {
@@ -548,21 +574,23 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
       setFavoriteDocuments([]);
       setError(`无法打开文件夹：${String(reason)}`);
     } finally {
+      workspaceOpeningRef.current = false;
       setWorkspaceLoading(false);
     }
   }, []);
 
   /** 请求用户选择新工作区；切换前会等待配置写入并保存当前 Markdown。 */
   const selectWorkspace = async () => {
+    if (folderDialogOpenRef.current || workspaceOpeningRef.current) return;
     // 防止切换后工作区状态已改变、旧工作区相关偏好仍在写入。
     if (hasPendingSettingsWrite()) {
       setError("配置正在保存，请稍候再切换工作区。");
       return;
     }
-    const selected = await open({ directory: true, multiple: false, title: "打开笔记文件夹" });
-    if (!selected) return;
-
+    folderDialogOpenRef.current = true;
     try {
+      const selected = await open({ directory: true, multiple: false, title: "打开笔记文件夹" });
+      if (!selected) return;
       await flushPendingSave();
       activeFileRef.current = null;
       setDirectoryContextMenu(null);
@@ -581,6 +609,8 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
       await loadWorkspace(selected);
     } catch (reason) {
       setError(String(reason));
+    } finally {
+      folderDialogOpenRef.current = false;
     }
   };
 
@@ -659,9 +689,11 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
   }, [settingsOpen]);
 
   useEffect(() => {
-    const lastWorkspace = initialSettings.workspaces.find(({ id }) => id === initialSettings.preferences.lastWorkspaceId);
-    if (lastWorkspace) void loadWorkspace(lastWorkspace.path);
-  }, [initialSettings.preferences.lastWorkspaceId, initialSettings.workspaces, loadWorkspace]);
+    // StrictMode 会重放 effect；只恢复一次，避免重复扫描或关闭后重新打开。
+    if (startupRestoredRef.current) return;
+    startupRestoredRef.current = true;
+    if (startupWorkspace) void loadWorkspace(startupWorkspace.path);
+  }, [startupWorkspace, loadWorkspace]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -872,6 +904,24 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
       setError(String(reason));
     }
   }, [flushPendingSave, openFile, openTabs]);
+
+  /**
+   * 保存下次启动是否恢复工作区的选项，不影响当前打开状态。
+   * @param enabled 用户选择的新开关值。@returns 保存完成后的 Promise。
+   * @sideEffect 成功后更新开关；失败保留旧值并显示错误，写入期间禁用设置交互。
+   */
+  const changeAutoOpenLastWorkspace = async (enabled: boolean) => {
+    setStartupPreferenceError("");
+    setPreferenceSaving(true);
+    try {
+      await updateAppPreference({ key: "autoOpenLastWorkspace", value: enabled });
+      setAutoOpenLastWorkspace(enabled);
+    } catch (reason) {
+      setStartupPreferenceError(`启动配置保存失败，请重新提交：${String(reason)}`);
+    } finally {
+      setPreferenceSaving(false);
+    }
+  };
 
   /** 持久化自动保存开关；关闭时取消尚未触发的自动保存定时器。 */
   const changeAutoSave = async (enabled: boolean) => {
@@ -1597,7 +1647,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
 
   return (
     <main
-      className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""} ${HAS_OVERLAY_TITLEBAR ? `overlay-window ${IS_WINDOWS ? "windows-window" : ""}` : ""}`}
+      className={`app-shell ${workspace ? "" : "welcome-shell"} ${sidebarOpen ? "" : "sidebar-collapsed"} ${sidebarResizing ? "sidebar-resizing" : ""} ${documentFullscreen ? "document-fullscreen" : ""} ${HAS_OVERLAY_TITLEBAR ? `overlay-window ${IS_WINDOWS ? "windows-window" : ""}` : ""}`}
       data-theme={themeColor}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
     >
@@ -1633,6 +1683,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
           <div className="windows-titlebar-brand">
             <img src="/superwiki-logo.png" alt="" />
             <span>SuperWiki</span>
+            {workspace && <>
             <button
               className="windows-titlebar-sidebar-toggle"
               onClick={() => setSidebarOpen((value) => !value)}
@@ -1650,6 +1701,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
             >
               <Save size={15} />
             </button>
+            </>}
           </div>
           <div className="windows-titlebar-actions">
             {titlebarDocumentActions}
@@ -1694,7 +1746,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
         </div>
       )}
 
-      <aside className="sidebar">
+      {workspace && <aside className="sidebar">
         <div className="sidebar-head">
           <div className="library-identity">
             <span className="brand-mark"><img src="/superwiki-logo.png" alt="" /></span>
@@ -1914,9 +1966,9 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
             </button>
           </div>
         )}
-      </aside>
+      </aside>}
 
-      {!sidebarOpen && (
+      {workspace && !sidebarOpen && (
         <button
           className="sidebar-reopen-button icon-button"
           onClick={() => setSidebarOpen(true)}
@@ -1927,7 +1979,7 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
         </button>
       )}
 
-      {sidebarOpen && (
+      {workspace && sidebarOpen && (
         <div
           className="sidebar-resizer"
           role="separator"
@@ -1994,12 +2046,14 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
         {error && <div className="error-banner">{error}</div>}
 
         {!workspace && !workspaceLoading && (
-          <EmptyState
-            icon={<img className="welcome-logo" src="/superwiki-logo.png" alt="SuperWiki" />}
-            title="打开一个文件夹开始使用"
-            description="选择包含 Markdown、图片、DOCX、XLSX 或 PPTX 文件的本地文件夹，目录会显示在左侧。"
-            action="打开文件夹"
-            onAction={() => void selectWorkspace()}
+          <WelcomePage
+            workspaces={knownWorkspaces}
+            onOpenWorkspace={(root) => {
+              // 系统目录选择器打开时不接受历史列表操作。
+              if (!folderDialogOpenRef.current) void loadWorkspace(root);
+            }}
+            onSelectFolder={() => void selectWorkspace()}
+            onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
 
@@ -2218,6 +2272,25 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
                       <h3>基础</h3>
                       <p>配置编辑器的基础使用方式。</p>
                     </div>
+                    <section className="editor-settings" aria-labelledby="startup-settings-title">
+                      <div className="editor-settings-heading">
+                        <h4 id="startup-settings-title">启动</h4>
+                      </div>
+                      <label className="editor-setting-row">
+                        <span>
+                          <strong>自动打开上次的工作区</strong>
+                          <small>关闭后，启动时显示欢迎页。下次启动生效。</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={autoOpenLastWorkspace}
+                          aria-label="自动打开上次的工作区"
+                          disabled={preferenceSaving}
+                          onChange={(event) => void changeAutoOpenLastWorkspace(event.target.checked)}
+                        />
+                      </label>
+                      {startupPreferenceError && <p className="shortcut-error" role="alert">{startupPreferenceError}</p>}
+                    </section>
                     <section className="editor-settings" aria-labelledby="editor-settings-title">
                       <div className="editor-settings-heading">
                         <h4 id="editor-settings-title">编辑器</h4>

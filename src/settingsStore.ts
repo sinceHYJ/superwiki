@@ -14,6 +14,8 @@ export type ThemeColor = "yellow" | "sky" | "mint" | "coral" | "lavender";
 export type AppPreferences = {
   /** 可同时打开的页签上限，始终为正整数。 */
   openTabLimit: number;
+  /** 是否在下次启动时自动打开上次工作区；默认开启。 */
+  autoOpenLastWorkspace: boolean;
   /** 是否自动保存 Markdown 编辑内容。 */
   autoSave: boolean;
   /** 当前界面主题色。 */
@@ -119,6 +121,7 @@ export type OpenWorkspaceResult = {
 /** 可写入 SQLite 的单项应用偏好及其严格类型。 */
 export type PreferenceChange =
   | { key: "openTabLimit"; value: number }
+  | { key: "autoOpenLastWorkspace"; value: boolean }
   | { key: "autoSave"; value: boolean }
   | { key: "themeColor"; value: ThemeColor }
   | { key: "contentWidth"; value: ContentWidth };

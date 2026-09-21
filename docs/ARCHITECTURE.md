@@ -13,6 +13,7 @@ superwiki/
 ├── src/                              # React + TypeScript 界面和客户端能力
 │   ├── main.tsx                      # React 入口
 │   ├── App.tsx                       # 主界面、工作区状态、文件生命周期和设置
+│   ├── WelcomePage.tsx               # 无工作区时的独立欢迎页和历史工作区入口
 │   ├── App.css                       # 应用布局、目录树和 Markdown 样式
 │   ├── WysiwygEditor.tsx             # Milkdown Crepe 所见即所得编辑器
 │   ├── OfficePreview.tsx              # DOCX/XLSX/PPTX 只读预览
@@ -140,7 +141,15 @@ superwiki/
 
 编辑器内容进入 React 状态后，默认经过 1000ms 防抖自动保存；`createSaveQueue` 保证写入串行，避免旧的自动保存覆盖较新的内容。切换文档、关闭标签页、切换工作区、删除当前文件或安装更新前会刷新待保存内容。关闭自动保存时，当前文档草稿只保留在内存中，用户应在离开前手动保存。
 
-用户偏好和索引使用 `localStorage` 保存，包括上次工作区、最近编辑、收藏、主题色、自动保存、打开标签页上限、快捷键和内容宽度。应用版本更新由 `AppUpdater.tsx` 和 `updateController.ts` 管理，安装前使用 `updateSave.ts` 保存打开的文档。
+用户偏好和索引通过 `settingsStore.ts` 调用 Rust，保存在应用私有目录的 SQLite 中，包括上次工作区、工作区列表、最近编辑、收藏、主题色、自动保存、启动恢复选项、打开标签页上限、快捷键和内容宽度。应用版本更新由 `AppUpdater.tsx` 和 `updateController.ts` 管理，安装前使用 `updateSave.ts` 保存打开的文档。
+
+### 3.6. Startup and Welcome Page
+
+`SettingsGate` 初始化 SQLite 后才挂载主界面；数据库读取或迁移失败时阻断启动并允许重试。架构版本 2 新增 `auto_open_last_workspace`，版本 3 新增工作区最近打开时间，二者均通过事务从旧版升级；迁移保留已有数据，失败回滚，未知版本继续拒绝读取。旧版应用无法读取升级后的配置库。
+
+启动时仅依据初始快照中的 `autoOpenLastWorkspace` 和 `lastWorkspaceId` 决定是否恢复工作区。恢复期间显示加载状态，失败返回欢迎页并保留错误和历史记录。运行中修改开关只影响下次启动，不清除上次工作区标记。
+
+`WelcomePage` 在未打开工作区时隐藏目录和编辑工具，展示历史工作区名称、完整路径及打开文件夹、设置入口。历史按最近成功打开时间倒序展示，不扫描磁盘；点击后通过现有 `open_workspace` 命令扫描、登记并更新时间，成功结果立即置顶。目录请求互斥，关闭工作区后回到欢迎页并沿用清除上次工作区标记的行为。
 
 ## 4. Data Stores
 

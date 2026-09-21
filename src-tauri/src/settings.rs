@@ -12,8 +12,8 @@ use std::{
 };
 use tauri::Manager;
 
-/// 当前支持的 SQLite 架构版本；不匹配时拒绝读写，避免以未知结构修改数据。
-const SCHEMA_VERSION: i64 = 1;
+/// 当前 SQLite 架构版本；启动时可从版本 1、2 升级，其他未知版本拒绝读写。
+const SCHEMA_VERSION: i64 = 3;
 /// 每个工作区保留的最近编辑 Markdown 文档上限。
 const MAX_RECENT_DOCUMENTS: i64 = 20;
 /// 可持久化覆盖的快捷键动作标识；不在此列表中的键会被拒绝。
@@ -38,6 +38,8 @@ const SHORTCUT_IDS: &[&str] = &[
 pub(crate) struct AppPreferences {
     /// 可同时打开的页签数量上限，必须为正整数。
     open_tab_limit: i64,
+    /// 是否在下次启动时自动打开上次工作区；默认开启。
+    auto_open_last_workspace: bool,
     /// 是否启用编辑器自动保存。
     auto_save: bool,
     /// 当前主题色标识。
@@ -243,20 +245,20 @@ fn open_existing(path: &Path) -> Result<Connection, String> {
     )
     .map_err(database_error)?;
     configure_connection(&connection)?;
-    validate_schema(&connection)?;
+    validate_schema(&connection, SCHEMA_VERSION)?;
     Ok(connection)
 }
 
 /// 验证数据库版本和必需表均与当前程序兼容。
 ///
-/// 参数：`connection` 为待检查的数据库连接。
+/// 参数：`connection` 为待检查的数据库连接，`expected_version` 为当前步骤要求的架构版本。
 /// 返回：兼容时为 `()`。
 /// 错误：版本或必需表不匹配时返回错误；该检查刻意不执行自动迁移。
-fn validate_schema(connection: &Connection) -> Result<(), String> {
+fn validate_schema(connection: &Connection, expected_version: i64) -> Result<(), String> {
     let version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(database_error)?;
-    if version != SCHEMA_VERSION {
+    if version != expected_version {
         return Err(format!("不支持的配置数据库版本：{version}"));
     }
     for table in [
@@ -281,16 +283,25 @@ fn validate_schema(connection: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// 初始化首次运行的设置数据库并读取启动快照。
+/// 初始化或升级设置数据库，并读取启动快照。
 ///
 /// 参数：`app` 用于定位应用私有数据库目录。
 /// 返回：包含应用、工作区和 OSS 设置的 `BootstrapSettings`。
-/// 错误/副作用：当 `user_version` 为零时仅初始化完全空的数据库；可能创建数据库、表和默认设置行。
+/// 错误/副作用：空库初始化、版本 1 事务升级；未知版本或损坏数据库返回错误。
 pub(crate) fn initialize(app: &tauri::AppHandle) -> Result<BootstrapSettings, String> {
     let path = database_path(app)?;
     let mut connection = Connection::open(&path).map_err(database_error)?;
     configure_connection(&connection)?;
-    let version: i64 = connection
+    initialize_database(&mut connection)?;
+    read_bootstrap(&connection)
+}
+
+/// 初始化空库或将版本 1、2 升级为版本 3，保留工作区及全部已有配置。
+///
+/// 参数：`connection` 为已配置连接；返回：初始化完成时为 `()`。
+/// 错误/副作用：未知版本、损坏架构或事务失败时返回错误；迁移失败自动回滚。
+fn initialize_database(connection: &mut Connection) -> Result<(), String> {
+    let mut version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(database_error)?;
     // 只有空库可以初始化，避免把半成品或旧架构误判为首次运行。
@@ -318,9 +329,54 @@ pub(crate) fn initialize(app: &tauri::AppHandle) -> Result<BootstrapSettings, St
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(database_error)?;
         transaction.commit().map_err(database_error)?;
+        version = SCHEMA_VERSION;
     }
-    validate_schema(&connection)?;
-    read_bootstrap(&connection)
+    // 只升级明确支持的旧版本；事务失败时连同新增列和版本号一起回滚。
+    if version == 1 {
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        validate_schema(&transaction, 1)?;
+        transaction.execute_batch(
+            "ALTER TABLE app_settings ADD COLUMN auto_open_last_workspace INTEGER NOT NULL DEFAULT 1 CHECK(auto_open_last_workspace IN (0, 1));",
+        ).map_err(database_error)?;
+        transaction
+            .pragma_update(None, "user_version", 2)
+            .map_err(database_error)?;
+        validate_schema(&transaction, 2)?;
+        // 下一步会新增排序字段；此处只验证唯一设置行，避免提前读取不存在的列。
+        let settings_count: i64 = transaction
+            .query_row(
+                "SELECT count(*) FROM app_settings WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(database_error)?;
+        if settings_count != 1 {
+            return Err("配置数据库缺少应用设置".into());
+        }
+        transaction.commit().map_err(database_error)?;
+        version = 2;
+    }
+    // 版本 2 尚未记录重新打开工作区的时间；旧 ID 的递减顺序是可恢复的最接近历史顺序。
+    if version == 2 {
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(database_error)?;
+        validate_schema(&transaction, 2)?;
+        transaction.execute_batch(
+            "ALTER TABLE workspaces ADD COLUMN last_opened_at INTEGER NOT NULL DEFAULT 0 CHECK(last_opened_at BETWEEN 0 AND 9007199254740991);\
+             UPDATE workspaces SET last_opened_at = id;\
+             CREATE INDEX workspaces_recent_open_order ON workspaces(last_opened_at DESC, id DESC);",
+        ).map_err(database_error)?;
+        transaction
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(database_error)?;
+        validate_schema(&transaction, SCHEMA_VERSION)?;
+        read_bootstrap(&transaction)?;
+        transaction.commit().map_err(database_error)?;
+    }
+    validate_schema(connection, SCHEMA_VERSION)
 }
 
 /// 汇总启动主界面所需的全部设置。
@@ -341,7 +397,7 @@ fn read_bootstrap(connection: &Connection) -> Result<BootstrapSettings, String> 
         })
         .map_err(database_error)?;
     let workspaces = connection
-        .prepare("SELECT id, path FROM workspaces ORDER BY id")
+        .prepare("SELECT id, path FROM workspaces ORDER BY last_opened_at DESC, id DESC")
         .and_then(|mut statement| {
             statement
                 .query_map([], |row| {
@@ -369,7 +425,7 @@ fn read_bootstrap(connection: &Connection) -> Result<BootstrapSettings, String> 
 fn read_preferences(connection: &Connection) -> Result<AppPreferences, String> {
     connection
         .query_row(
-            "SELECT open_tab_limit, auto_save, theme_color, content_width, theme_color_redesign_v1, last_workspace_id FROM app_settings WHERE id = 1",
+            "SELECT open_tab_limit, auto_save, theme_color, content_width, theme_color_redesign_v1, last_workspace_id, auto_open_last_workspace FROM app_settings WHERE id = 1",
             [],
             |row| {
                 Ok(AppPreferences {
@@ -379,6 +435,7 @@ fn read_preferences(connection: &Connection) -> Result<AppPreferences, String> {
                     content_width: row.get(3)?,
                     theme_color_redesign_v1: row.get::<_, i64>(4)? != 0,
                     last_workspace_id: row.get(5)?,
+                    auto_open_last_workspace: row.get::<_, i64>(6)? != 0,
                 })
             },
         )
@@ -395,6 +452,14 @@ pub(crate) fn update_preference(
     change: PreferenceChange,
 ) -> Result<(), String> {
     let connection = open_existing(&database_path(app)?)?;
+    write_preference(&connection, change)
+}
+
+/// 在给定连接上校验并更新单项配置，供 IPC 和数据库测试复用。
+///
+/// 参数：`connection` 为已验证的设置库；`change` 为待写入的键和值。
+/// 返回：成功时为 `()`；错误/副作用：非法值被拒绝，成功时仅更新指定列。
+fn write_preference(connection: &Connection, change: PreferenceChange) -> Result<(), String> {
     match change.key.as_str() {
         "openTabLimit" => {
             let value = change
@@ -406,6 +471,15 @@ pub(crate) fn update_preference(
                 .execute(
                     "UPDATE app_settings SET open_tab_limit = ?1 WHERE id = 1",
                     [value],
+                )
+                .map_err(database_error)?;
+        }
+        "autoOpenLastWorkspace" => {
+            let value = change.value.as_bool().ok_or("自动打开上次工作区配置无效")?;
+            connection
+                .execute(
+                    "UPDATE app_settings SET auto_open_last_workspace = ?1 WHERE id = 1",
+                    [i64::from(value)],
                 )
                 .map_err(database_error)?;
         }
@@ -485,7 +559,7 @@ pub(crate) fn save_shortcuts(
 ///
 /// 参数：`app` 用于定位数据库；`root` 必须是上层已规范化的工作区路径。
 /// 返回：持久化 `WorkspaceRecord` 与清理失效项后的 `WorkspacePreferences`。
-/// 错误/副作用：数据库读写失败时返回错误；成功时更新最近打开工作区。
+/// 错误/副作用：数据库读写失败时返回错误；成功时更新时间并把该工作区置于欢迎页列表最前。
 pub(crate) fn open_workspace(
     app: &tauri::AppHandle,
     root: &Path,
@@ -506,6 +580,13 @@ pub(crate) fn open_workspace(
             |row| row.get(0),
         )
         .map_err(database_error)?;
+    let opened_at = next_workspace_opened_at(&transaction)?;
+    transaction
+        .execute(
+            "UPDATE workspaces SET last_opened_at = ?1 WHERE id = ?2",
+            params![opened_at, id],
+        )
+        .map_err(database_error)?;
     transaction
         .execute(
             "UPDATE app_settings SET last_workspace_id = ?1 WHERE id = 1",
@@ -521,6 +602,28 @@ pub(crate) fn open_workspace(
         },
         preferences,
     ))
+}
+
+/// 生成严格递增的工作区打开时间，避免同一毫秒内连续打开导致列表顺序不稳定。
+///
+/// 参数：`transaction` 为登记工作区的独占事务。
+/// 返回：Unix 毫秒或比已有最大值大一的时间戳。
+/// 错误：系统时间无效、数据库读取失败或时间戳超过允许范围时返回错误。
+fn next_workspace_opened_at(transaction: &rusqlite::Transaction<'_>) -> Result<i64, String> {
+    let now = now_millis()?;
+    let previous: Option<i64> = transaction
+        .query_row("SELECT max(last_opened_at) FROM workspaces", [], |row| {
+            row.get(0)
+        })
+        .map_err(database_error)?;
+    let next = previous
+        .map(|value| value.checked_add(1).ok_or("工作区最近打开时间超出范围"))
+        .transpose()?
+        .map_or(now, |value| value.max(now));
+    if next > 9_007_199_254_740_991 {
+        return Err("工作区最近打开时间超出范围".into());
+    }
+    Ok(next)
 }
 
 /// 清除最近打开工作区标记，但保留工作区及其偏好记录供后续恢复。
@@ -1058,13 +1161,242 @@ mod tests {
     /// 副作用：仅读取测试内存数据库。
     fn app_settings_start_with_current_defaults() {
         let connection = test_database();
-        let values: (i64, i64, String, String, i64, Option<i64>) = connection
+        let values: (i64, i64, i64, String, String, i64, Option<i64>) = connection
             .query_row(
-                "SELECT open_tab_limit, auto_save, theme_color, content_width, theme_color_redesign_v1, last_workspace_id FROM app_settings WHERE id = 1",
+                "SELECT open_tab_limit, auto_open_last_workspace, auto_save, theme_color, content_width, theme_color_redesign_v1, last_workspace_id FROM app_settings WHERE id = 1",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
             )
             .unwrap();
-        assert_eq!(values, (8, 1, "sky".into(), "default".into(), 1, None));
+        assert_eq!(values, (8, 1, 1, "sky".into(), "default".into(), 1, None));
+    }
+
+    /// 使用冻结的版本 1 架构创建旧库，避免迁移测试随新架构一起变化。
+    /// 返回：含默认设置的内存连接；副作用：仅写入测试数据库。
+    fn legacy_database() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        connection
+            .execute_batch(include_str!("../test-fixtures/settings-v1.sql"))
+            .unwrap();
+        connection
+            .execute_batch("INSERT INTO app_settings(id) VALUES (1); PRAGMA user_version = 1;")
+            .unwrap();
+        connection
+    }
+
+    /// 使用版本 1 架构构造当前发布版本的版本 2 数据库。
+    /// 返回：含版本 2 启动设置的内存连接；副作用：仅修改测试数据库。
+    fn version_two_database() -> Connection {
+        let connection = legacy_database();
+        connection
+            .execute_batch(
+                "ALTER TABLE app_settings ADD COLUMN auto_open_last_workspace INTEGER NOT NULL DEFAULT 1 CHECK(auto_open_last_workspace IN (0, 1));\
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        connection
+    }
+
+    #[test]
+    /// 验证首次启动默认开启自动恢复，且写入后重新初始化仍保留布尔值。
+    /// 副作用：仅初始化和修改测试内存数据库。
+    fn startup_preference_defaults_and_round_trips() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        initialize_database(&mut connection).unwrap();
+        assert!(
+            read_preferences(&connection)
+                .unwrap()
+                .auto_open_last_workspace
+        );
+        for enabled in [false, true] {
+            write_preference(
+                &connection,
+                PreferenceChange {
+                    key: "autoOpenLastWorkspace".into(),
+                    value: serde_json::json!(enabled),
+                },
+            )
+            .unwrap();
+            initialize_database(&mut connection).unwrap();
+            let snapshot = serde_json::to_value(read_bootstrap(&connection).unwrap()).unwrap();
+            assert_eq!(snapshot["preferences"]["autoOpenLastWorkspace"], enabled);
+        }
+        for invalid in [
+            serde_json::json!(1),
+            serde_json::json!("false"),
+            serde_json::Value::Null,
+        ] {
+            assert!(write_preference(
+                &connection,
+                PreferenceChange {
+                    key: "autoOpenLastWorkspace".into(),
+                    value: invalid,
+                }
+            )
+            .is_err());
+        }
+        assert!(
+            read_preferences(&connection)
+                .unwrap()
+                .auto_open_last_workspace
+        );
+        assert!(connection
+            .execute("UPDATE app_settings SET auto_open_last_workspace = 2", [])
+            .is_err());
+    }
+
+    #[test]
+    /// 验证升级保留所有旧表数据，默认开启且重复初始化不会重置用户选择。
+    /// 副作用：仅迁移测试内存数据库，OSS 字段使用虚构测试值。
+    fn migration_preserves_existing_data_and_runs_once() {
+        let mut connection = legacy_database();
+        connection.execute_batch("
+            INSERT INTO workspaces(id, path) VALUES (1, '/one/notes'), (2, '/two/notes');
+            UPDATE app_settings SET open_tab_limit = 12, auto_save = 0, theme_color = 'mint', content_width = 'full', theme_color_redesign_v1 = 0, last_workspace_id = 2;
+            INSERT INTO favorite_documents VALUES (1, 'note.md', 123);
+            INSERT INTO recent_documents VALUES (2, 'note.md', 456);
+            INSERT INTO shortcut_overrides VALUES ('bold', 'Mod+Alt+KeyB');
+            INSERT INTO oss_sync VALUES (1, 0, 'test-region', 'test-endpoint', 'test-bucket', 'test-prefix', 'test-id', 'test-secret');
+        ").unwrap();
+        initialize_database(&mut connection).unwrap();
+        validate_schema(&connection, 3).unwrap();
+        let snapshot = read_bootstrap(&connection).unwrap();
+        assert!(snapshot.preferences.auto_open_last_workspace);
+        assert_eq!(snapshot.preferences.last_workspace_id, Some(2));
+        assert_eq!(snapshot.preferences.open_tab_limit, 12);
+        assert!(!snapshot.preferences.auto_save);
+        assert_eq!(snapshot.preferences.theme_color, "mint");
+        assert_eq!(snapshot.preferences.content_width, "full");
+        assert!(!snapshot.preferences.theme_color_redesign_v1);
+        assert_eq!(
+            snapshot
+                .workspaces
+                .iter()
+                .map(|item| (item.id, item.path.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(2, "/two/notes"), (1, "/one/notes")]
+        );
+        assert_eq!(snapshot.shortcut_overrides["bold"], "Mod+Alt+KeyB");
+        let favorite: (i64, String, i64) = connection
+            .query_row("SELECT * FROM favorite_documents", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(favorite, (1, "note.md".into(), 123));
+        let recent: (i64, String, i64) = connection
+            .query_row("SELECT * FROM recent_documents", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(recent, (2, "note.md".into(), 456));
+        let secret: String = connection
+            .query_row("SELECT access_key_secret FROM oss_sync", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(secret, "test-secret");
+        let oss = serde_json::to_value(snapshot.oss_sync).unwrap();
+        assert_eq!(oss["bucket"], "test-bucket");
+        write_preference(
+            &connection,
+            PreferenceChange {
+                key: "autoOpenLastWorkspace".into(),
+                value: serde_json::json!(false),
+            },
+        )
+        .unwrap();
+        initialize_database(&mut connection).unwrap();
+        assert!(
+            !read_preferences(&connection)
+                .unwrap()
+                .auto_open_last_workspace
+        );
+        assert_eq!(
+            read_preferences(&connection).unwrap().last_workspace_id,
+            Some(2)
+        );
+    }
+
+    #[test]
+    /// 验证版本 2 升级会回填历史顺序，并在重新打开时把该工作区置顶。
+    /// 副作用：仅迁移和更新测试内存数据库。
+    fn migration_from_version_two_orders_workspaces_by_recent_open() {
+        let mut connection = version_two_database();
+        connection
+            .execute_batch(
+                "INSERT INTO workspaces(id, path) VALUES (1, '/one/notes'), (2, '/two/notes');\
+                 UPDATE app_settings SET last_workspace_id = 2;",
+            )
+            .unwrap();
+        initialize_database(&mut connection).unwrap();
+        validate_schema(&connection, 3).unwrap();
+        let migrated = read_bootstrap(&connection).unwrap();
+        assert_eq!(
+            migrated
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.id)
+                .collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let transaction = connection.transaction().unwrap();
+        let opened_at = next_workspace_opened_at(&transaction).unwrap();
+        transaction
+            .execute(
+                "UPDATE workspaces SET last_opened_at = ?1 WHERE id = 1",
+                params![opened_at],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        let reopened = read_bootstrap(&connection).unwrap();
+        assert_eq!(
+            reopened
+                .workspaces
+                .iter()
+                .map(|workspace| workspace.id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    /// 验证新增列后的读取失败会同时回滚列和版本号，修复旧数据后可重试。
+    /// 副作用：仅在测试库中删除并恢复默认行。
+    fn failed_migration_rolls_back_schema_and_version() {
+        let mut connection = legacy_database();
+        connection.execute("DELETE FROM app_settings", []).unwrap();
+        assert!(initialize_database(&mut connection).is_err());
+        validate_schema(&connection, 1).unwrap();
+        let new_columns: i64 = connection.query_row("SELECT count(*) FROM pragma_table_info('app_settings') WHERE name = 'auto_open_last_workspace'", [], |row| row.get(0)).unwrap();
+        assert_eq!(new_columns, 0);
+        connection
+            .execute("INSERT INTO app_settings(id) VALUES (1)", [])
+            .unwrap();
+        initialize_database(&mut connection).unwrap();
+        assert!(
+            read_preferences(&connection)
+                .unwrap()
+                .auto_open_last_workspace
+        );
+    }
+
+    #[test]
+    /// 验证未知版本与非空零版本库继续被拒绝，不被误判为首次安装。
+    /// 副作用：仅修改测试内存数据库的版本号。
+    fn initialization_rejects_unknown_or_incomplete_databases() {
+        let mut connection = legacy_database();
+        for version in [0, 99] {
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+            assert!(initialize_database(&mut connection).is_err());
+            let actual: i64 = connection
+                .pragma_query_value(None, "user_version", |row| row.get(0))
+                .unwrap();
+            assert_eq!(actual, version);
+        }
     }
 }
