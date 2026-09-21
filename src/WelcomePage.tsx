@@ -1,8 +1,8 @@
 /**
- * 独立欢迎页：展示已登记的本地工作区及打开文件夹、设置入口。
+ * 独立欢迎页：展示已登记的本地工作区及打开文件夹入口。
  * 本组件只负责展示和回调，不扫描文件系统或写入持久化配置。
  */
-import { ChevronRight, Folder, FolderOpen, Settings } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import type { WorkspaceRecord } from "./settingsStore";
 
 /** 欢迎页的数据与操作入口，由 App 维护打开状态及请求互斥。 */
@@ -13,8 +13,6 @@ type WelcomePageProps = {
   onOpenWorkspace: (root: string) => void;
   /** 请求显示系统文件夹选择器。 */
   onSelectFolder: () => void;
-  /** 请求打开现有设置弹窗。 */
-  onOpenSettings: () => void;
 };
 
 /**
@@ -22,7 +20,7 @@ type WelcomePageProps = {
  * @param props 历史工作区及用户操作回调。
  * @returns 欢迎页元素；点击按钮时调用对应回调，打开失败由 App 展示错误。
  */
-export default function WelcomePage({ workspaces, onOpenWorkspace, onSelectFolder, onOpenSettings }: WelcomePageProps) {
+export default function WelcomePage({ workspaces, onOpenWorkspace, onSelectFolder }: WelcomePageProps) {
   return (
     <section className="welcome-page" aria-labelledby="welcome-title">
       <header className="welcome-header">
@@ -32,9 +30,6 @@ export default function WelcomePage({ workspaces, onOpenWorkspace, onSelectFolde
         <div className="welcome-actions">
           <button type="button" className="welcome-open" onClick={onSelectFolder}>
             <FolderOpen size={17} />打开文件夹
-          </button>
-          <button type="button" className="welcome-settings" onClick={onOpenSettings}>
-            <Settings size={17} />设置
           </button>
         </div>
       </header>

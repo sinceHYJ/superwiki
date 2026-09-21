@@ -2053,7 +2053,6 @@ function App({ initialSettings }: { initialSettings: BootstrapSettings }) {
               if (!folderDialogOpenRef.current) void loadWorkspace(root);
             }}
             onSelectFolder={() => void selectWorkspace()}
-            onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
 
