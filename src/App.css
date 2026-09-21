@@ -573,22 +573,22 @@ button.folder-placeholder:hover { color: var(--ui-border); border-color: #696d60
 .office-preview-state.error { max-width: min(560px, calc(100% - 36px)); color: #8d302b; background: #fff0ee; border-color: #f0cbc7; }
 
 .settings-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; padding: 32px; background: rgb(0 0 0 / .35); place-items: center; }
-.settings-dialog { display: flex; width: min(720px, calc(100vw - 64px)); height: min(500px, calc(100vh - 64px)); min-height: 380px; overflow: hidden; color: var(--ui-text); background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 24px 70px rgba(20, 21, 18, .28); flex-direction: column; }
-.settings-header { display: flex; flex: 0 0 58px; align-items: center; justify-content: space-between; padding: 0 18px 0 22px; border-bottom: 1px solid var(--ui-border); }
-.settings-header h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.settings-dialog { display: flex; width: min(900px, calc(100vw - 64px)); height: min(620px, calc(100vh - 64px)); min-height: 440px; overflow: hidden; color: var(--ui-text); background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; box-shadow: 0 20px 60px rgb(0 0 0 / .16); flex-direction: column; }
+.settings-header { display: flex; flex: 0 0 52px; align-items: center; justify-content: space-between; padding: 0 14px 0 18px; background: #fff; border-bottom: 1px solid var(--ui-border); }
+.settings-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
 .settings-header button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--ui-muted); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
 .settings-header button:hover { color: var(--ui-text); background: var(--ui-hover); }
-.settings-layout { display: grid; flex: 1; min-height: 0; grid-template-columns: 176px minmax(0, 1fr); }
-.settings-nav { padding: 14px 10px; background: var(--ui-sidebar); border-right: 1px solid var(--ui-border); }
-.settings-nav button { display: flex; align-items: center; gap: 9px; width: 100%; height: 36px; padding: 0 12px; color: var(--ui-muted); font-size: 13px; text-align: left; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.settings-layout { display: grid; flex: 1; min-height: 0; grid-template-columns: 152px minmax(0, 1fr); }
+.settings-nav { padding: 12px 8px; background: var(--ui-sidebar); border-right: 1px solid var(--ui-border); }
+.settings-nav button { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px; color: var(--ui-muted); font-size: 12px; text-align: left; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
 .settings-nav button.active { color: var(--accent-on-primary); font-weight: 600; background: var(--accent-primary); }
-.settings-content { min-width: 0; padding: 28px 30px; overflow-y: auto; }
-.settings-section-heading h3 { margin: 0; color: var(--ui-text); font-size: 18px; }
-.settings-section-heading p { margin: 7px 0 24px; color: var(--ui-muted); font-size: 12px; line-height: 1.6; }
+.settings-content { min-width: 0; padding: 24px 28px 36px; overflow-y: auto; }
+.settings-section-heading h3 { margin: 0; color: var(--ui-text); font-size: 17px; }
+.settings-section-heading p { margin: 6px 0 20px; color: var(--ui-muted); font-size: 11px; line-height: 1.6; }
 .editor-settings { overflow: hidden; background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; }
-.editor-settings-heading { padding: 13px 16px; background: var(--ui-sidebar); border-bottom: 1px solid var(--ui-border); }
+.editor-settings-heading { padding: 11px 14px; background: var(--ui-sidebar); border-bottom: 1px solid var(--ui-border); }
 .editor-settings-heading h4 { margin: 0; color: var(--ui-text); font-size: 13px; font-weight: 650; }
-.editor-setting-row { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 16px; }
+.editor-setting-row { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 24px; padding: 0 14px; }
 .editor-setting-row > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .editor-setting-row strong { color: var(--ui-text); font-size: 13px; font-weight: 600; }
 .editor-setting-row small { color: var(--ui-muted); font-size: 11px; line-height: 1.5; }
@@ -598,7 +598,7 @@ button.folder-placeholder:hover { color: var(--ui-border); border-color: #696d60
 .shortcut-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .shortcut-reset-all { flex: 0 0 auto; height: 32px; padding: 0 10px; color: var(--ui-muted); font-size: 12px; font-weight: 600; background: #fff; border: 1px solid var(--ui-border); border-radius: 4px; cursor: pointer; }
 .shortcut-reset-all:hover { background: var(--ui-sidebar); border-color: var(--ui-subtle); }
-.shortcut-settings { overflow: hidden; margin-top: 16px; background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; }
+.shortcut-settings { overflow: hidden; margin-top: 14px; background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; }
 .shortcut-setting-row { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 16px; border-top: 1px solid var(--ui-border); }
 .shortcut-settings .editor-settings-heading + .shortcut-setting-row { border-top: 0; }
 .shortcut-setting-row > span { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
@@ -616,7 +616,7 @@ button.folder-placeholder:hover { color: var(--ui-border); border-color: #696d60
 .theme-color-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .theme-color-option { display: flex; align-items: center; gap: 11px; min-width: 0; height: 52px; padding: 0 13px; color: var(--ui-text); font-size: 13px; text-align: left; background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; cursor: pointer; }
 .theme-color-option:hover { border-color: var(--ui-subtle); background: var(--ui-sidebar); }
-.theme-color-option.active { color: var(--accent-strong); border-color: var(--accent-border); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent-border); }
+.theme-color-option.active { color: var(--accent-on-primary); border-color: var(--accent-primary); background: var(--accent-primary); box-shadow: 0 0 0 1px var(--accent-primary); }
 .theme-color-swatch { flex: 0 0 24px; width: 24px; height: 24px; border: 1px solid rgba(20, 21, 18, .12); border-radius: 50%; box-shadow: inset 0 0 0 3px rgba(255, 255, 255, .5); }
 .theme-selected-mark { margin-left: auto; color: var(--accent-strong); font-size: 14px; font-weight: 700; }
 .content-width-settings { margin-top: 20px; overflow: hidden; background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; }
@@ -624,9 +624,10 @@ button.folder-placeholder:hover { color: var(--ui-border); border-color: #696d60
 .content-width-options button { display: flex; min-width: 0; min-height: 76px; padding: 14px 16px; color: var(--ui-text); text-align: left; background: #fff; border: 0; cursor: pointer; flex-direction: column; gap: 5px; }
 .content-width-options button + button { border-left: 1px solid var(--ui-border); }
 .content-width-options button:hover { background: var(--ui-sidebar); }
-.content-width-options button.active { color: var(--accent-strong); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-border); }
+.content-width-options button.active { color: var(--accent-on-primary); background: var(--accent-primary); box-shadow: inset 0 0 0 1px var(--accent-primary); }
 .content-width-options strong { font-size: 13px; font-weight: 600; }
 .content-width-options small { color: var(--ui-muted); font-size: 11px; line-height: 1.5; }
+.content-width-options button.active small { color: color-mix(in srgb, var(--accent-on-primary) 72%, transparent); }
 .about-card { display: flex; align-items: center; gap: 14px; padding: 18px; background: #fff; border: 1px solid var(--ui-border); border-radius: 6px; }
 .about-logo { width: 44px; height: 44px; object-fit: contain; }
 .about-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
