@@ -224,9 +224,9 @@ type FavoriteDocument = {
 /** 以 `root:path` 为 key 的未落盘 Markdown 草稿映射；缺少 key 表示无草稿。 */
 type DocumentDrafts = Record<string, string>;
 
-/** 主题选项的持久化 id、显示名称和色样；sky 沿用历史默认键，对应 DBX 黑白主题。 */
+/** 主题选项的持久化 id、显示名称和色样；sky 沿用历史默认键，对应默认主题。 */
 const THEME_COLORS: { id: ThemeColor; name: string; color: string }[] = [
-  { id: "sky", name: "DBX 黑白", color: "#171717" },
+  { id: "sky", name: "默认", color: "#171717" },
   { id: "yellow", name: "明亮黄", color: "#d9ed72" },
   { id: "mint", name: "薄荷绿", color: "#86efac" },
   { id: "coral", name: "珊瑚粉", color: "#fda4af" },
